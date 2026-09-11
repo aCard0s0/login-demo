@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>login-demo</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 34rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
+    input, button { font: inherit; padding: .4rem .6rem; }
+    form { display: flex; gap: .5rem; margin: 1rem 0; }
+    form input { flex: 1; }
+    ul { list-style: none; padding: 0; }
+    li { display: flex; gap: .5rem; align-items: center; padding: .3rem 0; }
+    li span { flex: 1; }
+    li.done span { text-decoration: line-through; opacity: .5; }
+    .error { color: #c00; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>login-demo</h1>
+
+  <section id="login-view">
+    <form id="login-form">
+      <input id="username" placeholder="username" autocomplete="username" required>
+      <input id="password" type="password" placeholder="password" autocomplete="current-password" required>
+      <button>Log in</button>
+    </form>
+    <p class="error" id="login-error"></p>
+    <p><small>Try <code>demo</code> / <code>demo</code></small></p>
+  </section>
+
+  <section id="todo-view" hidden>
+    <p>Signed in as <b id="who"></b> — <button id="logout">log out</button></p>
+    <form id="todo-form">
+      <input id="title" placeholder="What needs doing?" required>
+      <button>Add</button>
+    </form>
+    <ul id="todos"></ul>
+  </section>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+let token = sessionStorage.getItem('token');
+let username = sessionStorage.getItem('username');
+
+const api = async (path, options = {}) => {
+  const res = await fetch(path, {
+    ...options,
+    headers: { 'content-type': 'application/json', ...(token && { authorization: `Bearer ${token}` }), ...options.headers },
+  });
+  if (res.status === 401 && token) { logout(); throw new Error('session expired'); } // a 401 with no token is a failed login, not an expiry
+  // Handlers returning void (DELETE) send 200 with an empty body, so parse only when there is one.
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new Error(body?.error || res.statusText);
+  return body;
+};
+
+const render = async () => {
+  $('login-view').hidden = !!token;
+  $('todo-view').hidden = !token;
+  if (!token) return;
+  $('who').textContent = username;
+  const todos = await api('/api/todos');
+  $('todos').replaceChildren(...todos.map((t) => {
+    const li = document.createElement('li');
+    li.className = t.done ? 'done' : '';
+    const box = Object.assign(document.createElement('input'), { type: 'checkbox', checked: t.done });
+    box.onclick = () => api(`/api/todos/${t.id}`, { method: 'PUT' }).then(render);
+    const label = Object.assign(document.createElement('span'), { textContent: t.title });
+    const del = Object.assign(document.createElement('button'), { textContent: '×' });
+    del.onclick = () => api(`/api/todos/${t.id}`, { method: 'DELETE' }).then(render);
+    li.append(box, label, del);
+    return li;
+  }));
+};
+
+function logout() {
+  if (token) fetch(`/api/logout?token=${token}`, { method: 'POST' }).catch(() => {});
+  token = username = null;
+  sessionStorage.clear();
+  render();
+}
+
+$('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  $('login-error').textContent = '';
+  try {
+    const body = JSON.stringify({ username: $('username').value, password: $('password').value });
+    const out = await api('/api/login', { method: 'POST', body });
+    ({ token, username } = out);
+    sessionStorage.setItem('token', token);
+    sessionStorage.setItem('username', username);
+    $('login-form').reset();
+    render();
+  } catch (err) {
+    $('login-error').textContent = err.message;
+  }
+};
+
+$('todo-form').onsubmit = async (e) => {
+  e.preventDefault();
+  await api('/api/todos', { method: 'POST', body: JSON.stringify({ title: $('title').value }) });
+  $('todo-form').reset();
+  render();
+};
+
+$('logout').onclick = logout;
+render();
+</script>
+</body>
+</html>

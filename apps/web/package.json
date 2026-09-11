@@ -1,0 +1,10 @@
+{
+  "name": "web",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Frontend for auth-service + todo-service",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
