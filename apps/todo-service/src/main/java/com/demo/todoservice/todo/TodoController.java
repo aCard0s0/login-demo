@@ -14,7 +14,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** Every endpoint here is private: the owner comes from the caller's token, never from the request body. */
+/**
+ * Every endpoint here is private: who is asking comes from the caller's token, never from the request body,
+ * and what that answer is allowed to reach is {@link TodoService}'s decision rather than this class's.
+ */
 @RestController
 @RequestMapping("/api/todos")
 public class TodoController {
@@ -29,19 +32,19 @@ public class TodoController {
 
     @GetMapping
     public List<TodoResponse> all(@RequestHeader(value = "Authorization", required = false) String authz) {
-        return todos.list(jwt.ownerOf(authz)).stream().map(TodoResponse::of).toList();
+        return todos.list(jwt.callerOf(authz)).stream().map(TodoResponse::of).toList();
     }
 
     @PostMapping
     public TodoResponse add(@RequestHeader(value = "Authorization", required = false) String authz,
                             @RequestBody NewTodo in) {
-        return TodoResponse.of(todos.add(jwt.ownerOf(authz), in.title()));
+        return TodoResponse.of(todos.add(jwt.callerOf(authz), in.title()));
     }
 
     @PutMapping("/{id}")
     public TodoResponse toggle(@RequestHeader(value = "Authorization", required = false) String authz,
                                @PathVariable Long id) {
-        return TodoResponse.of(todos.toggle(jwt.ownerOf(authz), id));
+        return TodoResponse.of(todos.toggle(jwt.callerOf(authz), id));
     }
 
     /** Edits an existing todo. Only the fields present in the body change; the rest are left as they are. */
@@ -49,12 +52,12 @@ public class TodoController {
     public TodoResponse update(@RequestHeader(value = "Authorization", required = false) String authz,
                                @PathVariable Long id,
                                @RequestBody UpdateTodo in) {
-        return TodoResponse.of(todos.update(jwt.ownerOf(authz), id, in.title(), in.done()));
+        return TodoResponse.of(todos.update(jwt.callerOf(authz), id, in.title(), in.done()));
     }
 
     @DeleteMapping("/{id}")
     public void delete(@RequestHeader(value = "Authorization", required = false) String authz,
                        @PathVariable Long id) {
-        todos.delete(jwt.ownerOf(authz), id);
+        todos.delete(jwt.callerOf(authz), id);
     }
 }

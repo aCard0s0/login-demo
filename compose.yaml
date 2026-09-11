@@ -24,6 +24,10 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/auth
       SPRING_DATASOURCE_USERNAME: auth
       SPRING_DATASOURCE_PASSWORD: auth
+      # The deployment's admin, seeded into the database at startup. Compose reads these from .env and
+      # refuses to start the stack without them, rather than quietly coming up with nobody in charge.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env — copy .env.example}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env — copy .env.example}
     depends_on:
       db:
         condition: service_healthy

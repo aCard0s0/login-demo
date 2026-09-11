@@ -4,3 +4,6 @@ node_modules/
 .idea
 *.iml
 .vscode/
+
+# Real credentials for the local stack. .env.example is the committed stand-in.
+.env
