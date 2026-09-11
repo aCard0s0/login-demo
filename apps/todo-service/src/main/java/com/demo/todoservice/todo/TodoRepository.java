@@ -1,4 +1,4 @@
-package com.demo.todoservice;
+package com.demo.todoservice.todo;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 

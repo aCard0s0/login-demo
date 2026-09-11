@@ -26,6 +26,7 @@
         <java.version>26</java.version>
         <!-- Not managed by the Spring Boot BOM, unlike everything else here. -->
         <sqlite-jdbc.version>3.47.1.0</sqlite-jdbc.version>
+        <nimbus-jose-jwt.version>10.5</nimbus-jose-jwt.version>
     </properties>
 
     <dependencies>
@@ -39,14 +40,31 @@
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!--
+            Tests only. They run against a throwaway SQLite file so `./mvnw test` needs nothing installed;
+            both services talk to Postgres everywhere else.
+        -->
+        <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
             <version>${sqlite-jdbc.version}</version>
+            <scope>test</scope>
         </dependency>
-        <!-- Hibernate keeps the SQLite dialect out of core; version comes from the Boot BOM. -->
+        <!-- RS256: auth-service signs with the private half, todo-service verifies with the public half. -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>${nimbus-jose-jwt.version}</version>
+        </dependency>
+        <!-- Hibernate keeps the SQLite dialect out of core; needed by the tests, not by the services. -->
         <dependency>
             <groupId>org.hibernate.orm</groupId>
             <artifactId>hibernate-community-dialects</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

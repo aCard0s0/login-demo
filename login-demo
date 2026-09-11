@@ -1,0 +1,408 @@
+#!/usr/bin/env bash
+# login-demo — the one script that runs this repo.
+#
+# HOW TO ADD A COMMAND (agents: read this before editing anything below)
+#  1. Add ONE row to the COMMANDS registry:  name|alias|args|summary. A namespaced
+#     command has a space in the name ("db reset"); "#Label" starts a section. That
+#     row is the ONLY place a command name may live — help, `<cmd> --help`, completions
+#     and the dispatcher are generated from it. Naming a command twice here is a bug.
+#  2. Define cmd_<name>, spaces and dashes as underscores ("db reset" -> cmd_db_reset).
+#     Optional long help: cmd_<fn>_help.
+#  3. Bind arguments to named locals and validate ALL of them before the first side
+#     effect, so `restart --typo` cannot tear the stack down and then fail. Reject
+#     unknown flags; never accept-and-ignore an argument.
+#  4. Side effects go through `run` (free --dry-run/--verbose), destructive ones
+#     through `confirm` (free --yes, plus refusal on non-interactive stdin).
+#  Invariants: no logic in the dispatcher; one arg-parsing idiom (while/case/shift);
+#  targets are arguments to verbs (`./login-demo start web`, never `./login-demo web`);
+#  human text only via say/note/step/warn/die — stdout carries values, stderr prose.
+#  bash 3.2 (stock macOS): no associative arrays, no ${var,,}, no mapfile, and never a
+#  bare "${a[@]}" that may be empty — write ${a[@]+"${a[@]}"}.
+set -Eeuo pipefail
+# ── identity & repo root (survives symlinks into ~/bin, and living in scripts/) ──
+PROG="${0##*/}"; VERSION="0.1.0"; TAGLINE="build, run and inspect this repo"
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+  _d=$(cd -P "$(dirname "$SELF")" && pwd); SELF=$(readlink "$SELF")
+  case "$SELF" in /*) ;; *) SELF="$_d/$SELF" ;; esac
+done
+SCRIPT_DIR=$(cd -P "$(dirname "$SELF")" && pwd); ROOT="$SCRIPT_DIR"
+while [ "$ROOT" != "/" ] && [ ! -e "$ROOT/.git" ]; do ROOT=$(dirname "$ROOT"); done
+[ "$ROOT" != "/" ] || ROOT="$SCRIPT_DIR"
+cd "$ROOT"
+# ── config: every knob env-overridable, every name prefixed with the tool ──
+PROJECT="${LOGIN_DEMO_PROJECT:-login-demo}"; PORT="${LOGIN_DEMO_PORT:-3000}"
+COMPOSE_FILE="${LOGIN_DEMO_COMPOSE_FILE:-$ROOT/compose.yaml}"
+SERVICES="db auth-service todo-service web"   # valid targets; feeds help and did-you-mean
+MODULES="auth-service todo-service"           # the two Maven modules, a subset of SERVICES
+DRY_RUN=""; ASSUME_YES=""; VERBOSE=""; TMP_DIR=""; CURRENT_CMD=""
+TARGETS=(); OPT_BUILD=""; OPT_NOCACHE=""
+# ── output: colour only on a TTY; values on stdout, prose on stderr ──
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; YLW=$'\033[33m'; RST=$'\033[0m'
+else BOLD=''; DIM=''; RED=''; YLW=''; RST=''; fi
+say()  { printf '%s\n' "$*"; }
+note() { printf '%s%s%s\n' "$DIM" "$*" "$RST" >&2; }
+step() { printf '%s→ %s%s\n' "$BOLD" "$*" "$RST" >&2; }
+warn() { printf '%s%s: %s%s\n' "$YLW" "$PROG" "$*" "$RST" >&2; }
+die()  { printf '%s%s: %s%s\n' "$RED" "$PROG" "$1" "$RST" >&2; exit "${2:-1}"; }
+# exit codes: 0 ok · 1 runtime failure · 2 usage error · 3 missing dependency · 4 bad state
+on_err() { local rc=$?; printf '%s%s: unexpected failure at line %s (exit %s)%s\n' "$RED" "$PROG" "${1:-?}" "$rc" "$RST" >&2; exit "$rc"; }
+cleanup() { [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"; }
+trap 'on_err $LINENO' ERR; trap cleanup EXIT
+trap 'cleanup; exit 130' INT; trap 'cleanup; exit 143' TERM
+# ── command registry: the single source of truth ──
+COMMANDS=$(cat <<'REGISTRY'
+#Develop
+dev||[service...] [--no-build]|Bring the stack up in the foreground; ctrl-C stops it
+test||[module]|Run the Maven suite -- SQLite backed, so nothing need be running
+build||[service...] [--no-cache]|Build the container images
+clean|||Delete the Maven build output -- never containers or volumes
+#Run
+start|up|[service...] [--build]|Start the stack in the background and wait for health
+stop||[service...]|Halt containers, deleting nothing
+restart||[service...] [--build]|Stop then start the same targets
+status|ps||Show what is running, with the port web is really bound to
+logs||[service...] [-f] [-n N]|Print (or follow) container logs
+down||[--volumes]|Remove containers and network; --volumes (-v) drops the database too
+#Inspect
+doctor|||Check the toolchain and report exactly what is broken
+verify|||Smoke test a running stack end to end, over real HTTP
+exec||service command...|Run one command inside a running container
+shell|sh|service|Open a shell inside a running container
+db reset|||Throw the database volume away and start it empty again
+#Meta
+help||[command]|Show this help, or the help for one command
+version|||Print the script and project versions
+REGISTRY
+)
+reg()       { printf '%s\n' "$COMMANDS"; }
+reg_names() { reg | awk -F'|' 'NF>1 {print $1}'; }
+reg_field() { reg | awk -F'|' -v n="$1" -v f="$2" '$1==n {print $f; exit}'; }
+fn_of()     { printf 'cmd_%s' "$(printf '%s' "$1" | tr ' -' '__')"; }
+lookup() {                             # lookup <tok> [tok2] -> canonical name, or empty
+  local hit=""
+  if [ -n "${2:-}" ]; then hit=$(reg_names | grep -Fx -- "$1 $2" || true); fi
+  [ -n "$hit" ] || hit=$(reg_names | grep -Fx -- "$1" || true)
+  [ -n "$hit" ] || hit=$(reg | awk -F'|' -v a="$1" 'NF>1 && $2==a {print $1; exit}')
+  printf '%s' "$hit"
+}
+suggest() {
+  reg_names | awk -v w="$1" '{ s=0
+    if (index($0,w) || index(w,$0)) s=3; else if (substr($0,1,2)==substr(w,1,2)) s=2
+    if (s>b) { b=s; best=$0 } } END { if (b>0) print best }'
+}
+valid_target() { case " $SERVICES " in *" $1 "*) return 0 ;; esac; return 1; }
+valid_module() { case " $MODULES " in *" $1 "*) return 0 ;; esac; return 1; }
+wants_help() { local a; for a in "$@"; do case "$a" in -h|--help) return 0 ;; --) break ;; esac; done; return 1; }
+
+usage() {
+  cat <<EOF
+${BOLD}$PROG${RST} — $TAGLINE
+
+Usage: ./$PROG [-n|--dry-run] [-y|--yes] [-v|--verbose] <command> [args...]
+       ./$PROG <command> --help
+
+Commands:
+EOF
+  reg | awk -F'|' -v b="$BOLD" -v r="$RST" '
+    /^#/ { printf "\n%s%s%s\n", b, substr($0,2), r; next }
+    NF>1 { c=$1; if ($2!="") c=c ", " $2; printf "  %-18s %s\n", c, $4 }'
+  printf '\nTargets: %s\nConfig:  LOGIN_DEMO_COMPOSE_FILE=%s  LOGIN_DEMO_PORT=%s  (also LOGIN_DEMO_PROJECT, NO_COLOR)\n' \
+    "$SERVICES" "$COMPOSE_FILE" "$PORT"
+}
+cmd_help() {
+  if [ $# -eq 0 ]; then usage; return 0; fi
+  local name fn
+  name=$(lookup "$1" "${2:-}"); [ -n "$name" ] || die "no such command: $1" 2
+  say "${BOLD}$PROG $name${RST} $(reg_field "$name" 3)"; say ""; say "  $(reg_field "$name" 4)"
+  fn="$(fn_of "$name")_help"
+  if declare -f "$fn" >/dev/null 2>&1; then say ""; "$fn"; fi
+}
+# ── preflight: never above the dispatcher — help must work with no docker installed ──
+have() { command -v "$1" >/dev/null 2>&1; }
+require_docker() {
+  have docker || die "docker is not on PATH — install Docker Desktop, then retry" 3
+  docker compose version >/dev/null 2>&1 || die "no 'docker compose' plugin — this needs Compose v2, not docker-compose" 3
+  docker info >/dev/null 2>&1 || die "the Docker daemon is not running — start Docker Desktop" 3
+  [ -f "$COMPOSE_FILE" ] || die "no compose file at $COMPOSE_FILE (wrong repo, or LOGIN_DEMO_COMPOSE_FILE is stale)" 4
+}
+require_java() { have java || die "no java on PATH — the Maven wrapper needs a JDK" 3; }
+run() { if [ -n "$DRY_RUN$VERBOSE" ]; then note "+ $*"; fi; if [ -n "$DRY_RUN" ]; then return 0; fi; "$@"; }
+confirm() {
+  if [ -n "$ASSUME_YES" ]; then return 0; fi
+  [ -t 0 ] || die "refusing to do this non-interactively — pass --yes if you mean it" 2
+  printf '%s%s [y/N] %s' "$YLW" "$*" "$RST" >&2; local reply=""; read -r reply || true
+  case "$reply" in y|Y|yes|YES) return 0 ;; *) die "aborted" 2 ;; esac
+}
+compose() { run docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"; }
+# ── shared parsing: one idiom, plus a per-command allow-list so nothing is ignored ──
+parse_targets() {                      # parse_targets "<allowed flags>" "$@"
+  local allowed=" $1 "; shift; TARGETS=(); OPT_BUILD=""; OPT_NOCACHE=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -*) case "$allowed" in *" $1 "*) ;; *) die "unknown option: $1 (try ./$PROG $CURRENT_CMD --help)" 2 ;; esac
+          case "$1" in --build) OPT_BUILD=1 ;; --no-build) OPT_BUILD="" ;; --no-cache) OPT_NOCACHE=1 ;; esac ;;
+      *)  valid_target "$1" || die "unknown target: $1. Valid targets: $SERVICES" 2; TARGETS+=("$1") ;;
+    esac
+    shift
+  done
+}
+no_args() { [ $# -eq 0 ] || die "$CURRENT_CMD takes no arguments (got: $1)" 2; }
+# ── commands ──
+do_build() { local f=(build); [ -z "$OPT_NOCACHE" ] || f+=(--no-cache); compose "${f[@]}" ${TARGETS[@]+"${TARGETS[@]}"}; }
+do_up() { step "starting ${TARGETS[*]:-everything}"
+  compose up -d --wait ${TARGETS[@]+"${TARGETS[@]}"}   # --wait health-gates; never sleep
+  say "ready — http://localhost:$PORT"; }
+cmd_dev() {
+  local build=1; TARGETS=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --no-build) build="" ;;
+      -*) die "unknown option: $1 (try ./$PROG dev --help)" 2 ;;
+      *)  valid_target "$1" || die "unknown target: $1. Valid targets: $SERVICES" 2; TARGETS+=("$1") ;;
+    esac
+    shift
+  done
+  require_docker
+  local f=(up); [ -z "$build" ] || f+=(--build)
+  step "running ${TARGETS[*]:-everything} in the foreground"
+  compose "${f[@]}" ${TARGETS[@]+"${TARGETS[@]}"}
+}
+cmd_dev_help() { say "  Attached, so logs land in this terminal and ctrl-C takes the stack down."
+                 say "  For a background stack that outlives the terminal, use \`$PROG start\`."; }
+cmd_test() {
+  local module=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -*) die "unknown option: $1 (try ./$PROG test --help)" 2 ;;
+      *)  valid_module "$1" || die "unknown module: $1. Valid modules: $MODULES" 2; module="apps/$1" ;;
+    esac
+    shift
+  done
+  require_java
+  step "running tests${module:+ for ${module##*/}}"
+  if [ -n "$module" ]; then run ./mvnw -pl "$module" test; else run ./mvnw test; fi
+}
+cmd_test_help() { say "  The suite runs against a throwaway SQLite file, so it needs no database and no"
+                  say "  Docker. That also means it does not exercise the Postgres the services use."; }
+cmd_build() { parse_targets "--no-cache" "$@"; require_docker
+  step "building ${TARGETS[*]:-everything}"; do_build; }
+cmd_build_help() { say "  The image build compiles the jars inside it, so this needs no local JDK."; }
+cmd_clean() {
+  no_args "$@"; require_java
+  # Only regenerable files this repo produced. No containers, no volumes, nothing tracked.
+  step "removing build artifacts"
+  run ./mvnw -q clean
+  say "clean done"
+}
+cmd_clean_help() { say "  Containers and volumes are \`$PROG down\`; this never touches them."; }
+cmd_start() { parse_targets "--build --no-build" "$@"; require_docker
+  if [ -n "$OPT_BUILD" ]; then do_build; fi; do_up; }
+cmd_start_help() { say "  Compose resolves prerequisites; --build rebuilds the targets first."
+                   say "  The first run builds the images, which takes a few minutes."; }
+cmd_stop() { parse_targets "" "$@"; require_docker; step "stopping ${TARGETS[*]:-everything}"
+  compose stop ${TARGETS[@]+"${TARGETS[@]}"}; }
+cmd_restart() {                        # parse once, up front: validate before side effects
+  parse_targets "--build --no-build" "$@"; require_docker
+  compose stop ${TARGETS[@]+"${TARGETS[@]}"}
+  if [ -n "$OPT_BUILD" ]; then do_build; fi; do_up
+}
+cmd_status() {
+  no_args "$@"; require_docker; compose ps
+  local bound=""                       # report the port really bound, not the default
+  bound=$(docker compose -p "$PROJECT" -f "$COMPOSE_FILE" port web "$PORT" 2>/dev/null || true)
+  say "url: http://${bound:-localhost:$PORT}"
+}
+cmd_logs() {
+  local follow="" tail="100"; TARGETS=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -f|--follow) follow=1 ;;
+      -n|--tail)   [ $# -ge 2 ] || die "-n needs a line count" 2; tail="$2"; shift ;;
+      -*) die "unknown option: $1 (try ./$PROG logs --help)" 2 ;;
+      *)  valid_target "$1" || die "unknown target: $1. Valid targets: $SERVICES" 2; TARGETS+=("$1") ;;
+    esac
+    shift
+  done
+  require_docker; local f=(logs --tail "$tail"); [ -z "$follow" ] || f+=(--follow)
+  compose "${f[@]}" ${TARGETS[@]+"${TARGETS[@]}"}
+}
+# Three teardown verbs, never aliases of each other: stop halts, down removes the local
+# runtime, clean deletes build artifacts. `make clean`/`cargo clean` have trained everyone
+# that clean is the harmless one, so clean must never be able to reach a container.
+cmd_down() {
+  local vols=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -v|--volumes) vols=1 ;;   # -v is volumes here, as in compose; verbose is --verbose only
+      -*) die "unknown option: $1 (try ./$PROG down --help)" 2 ;;
+      *)  die "down takes no targets (got: $1) — it removes the whole project" 2 ;;
+    esac
+    shift
+  done
+  require_docker
+  if [ -n "$vols" ]; then confirm "delete every '$PROJECT' data volume? every account and todo goes with it"; fi
+  local f=(down --remove-orphans); [ -z "$vols" ] || f+=(--volumes)
+  compose "${f[@]}"; say "removed containers and network${vols:+, and the data volumes}"
+}
+cmd_down_help() { say "  -v is short for --volumes, as in compose; verbose is --verbose only."
+                  say "  Halt without removing is \`$PROG stop\`; build artifacts are \`$PROG clean\`."; }
+cmd_exec() {
+  local service=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -*) die "unknown option: $1 (try ./$PROG exec --help)" 2 ;;
+      *)  service="$1"; shift; break ;;
+    esac
+  done
+  [ -n "$service" ] || die "exec needs a service. Valid targets: $SERVICES" 2
+  valid_target "$service" || die "unknown target: $service. Valid targets: $SERVICES" 2
+  [ $# -gt 0 ] || die "exec needs a command to run in $service" 2
+  require_docker; compose exec "$service" "$@"
+}
+cmd_exec_help() { say "  Everything after the service name is handed to the container untouched."; }
+cmd_shell() {
+  local service=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -*) die "unknown option: $1 (try ./$PROG shell --help)" 2 ;;
+      *)  [ -z "$service" ] || die "shell takes one service (got a second: $1)" 2
+          valid_target "$1" || die "unknown target: $1. Valid targets: $SERVICES" 2; service="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$service" ] || die "shell needs a service. Valid targets: $SERVICES" 2
+  require_docker; compose exec "$service" sh
+}
+cmd_shell_help() { say "  Every image here is Alpine or Debian-slim, so the shell is sh, not bash."; }
+cmd_db_reset() {
+  no_args "$@"; require_docker
+  confirm "throw away the '$PROJECT' database? every account and todo goes with it"
+  step "recreating the database"
+  compose stop                         # the services hold connections open
+  compose rm -fs db
+  run docker volume rm -f "${PROJECT}_db-data"
+  compose up -d --wait db
+  say "database recreated empty — bring the services back with ./$PROG start"
+}
+cmd_db_reset_help() { say "  Drops the volume, so the init script runs again and both databases and roles"
+                      say "  are recreated. The services are left stopped; \`$PROG start\` brings them back."; }
+cmd_verify() {
+  no_args "$@"
+  have curl || die "curl is not on PATH — verify talks to the stack over real HTTP" 3
+  local base="http://localhost:$PORT" email pass token todos id
+  if [ -n "$DRY_RUN" ]; then note "+ would register an account and a todo against $base"; return 0; fi
+
+  curl -fsS -o /dev/null "$base/api/public/stats" 2>/dev/null \
+    || die "nothing is answering on $base — start the stack with ./$PROG start" 4
+
+  email="verify-$(date +%s)@example.invalid"; pass="verify-password"
+  step "registering $email"
+  curl -fsS -o /dev/null -X POST "$base/api/accounts" -H 'content-type: application/json' \
+    -d "{\"name\":\"verify\",\"email\":\"$email\",\"password\":\"$pass\"}" \
+    || die "register was refused — auth-service or the database is unhappy" 1
+
+  token=$(curl -fsS -X POST "$base/api/login" -H 'content-type: application/json' \
+    -d "{\"email\":\"$email\",\"password\":\"$pass\"}" \
+    | sed -E 's/.*"token":"([^"]+)".*/\1/') || die "login was refused" 1
+  case "$token" in *.*.*) ;; *) die "login did not come back with a three-part JWT" 1 ;; esac
+
+  step "reading the account back"
+  curl -fsS -o /dev/null "$base/api/accounts/me" -H "Authorization: Bearer $token" \
+    || die "auth-service would not accept the token it had just issued" 1
+
+  step "writing a todo"
+  curl -fsS -o /dev/null -X POST "$base/api/todos" -H "Authorization: Bearer $token" \
+    -H 'content-type: application/json' -d '{"title":"verify round trip"}' \
+    || die "todo-service rejected the token — check it can reach the JWKS endpoint" 1
+  todos=$(curl -fsS "$base/api/todos" -H "Authorization: Bearer $token")
+  case "$todos" in *"verify round trip"*) ;; *) die "the todo did not come back: $todos" 1 ;; esac
+
+  step "editing the todo"
+  id=$(printf '%s' "$todos" | sed -E 's/.*"id":([0-9]+).*/\1/')   # greedy, so the newest todo
+  curl -fsS -o /dev/null -X PATCH "$base/api/todos/$id" -H "Authorization: Bearer $token" \
+    -H 'content-type: application/json' -d '{"title":"verify edit","done":true}' \
+    || die "the edit was refused" 1
+  todos=$(curl -fsS "$base/api/todos" -H "Authorization: Bearer $token")
+  case "$todos" in *'"verify edit"'*'"done":true'*) ;; *) die "the edit did not stick: $todos" 1 ;; esac
+
+  # The point of the whole design: no token, no todos.
+  if curl -fsS -o /dev/null "$base/api/todos" 2>/dev/null; then
+    die "todo-service served a list with no token at all" 1
+  fi
+
+  say "ok — auth-service signed a JWT, todo-service verified it locally, the round trip came back"
+  note "this left an account behind: $email"
+}
+cmd_verify_help() { say "  Needs a running stack. It writes: one account and one todo, both real, both"
+                    say "  left behind. \`$PROG db reset\` is how you clear them out."; }
+cmd_doctor() {
+  no_args "$@"
+  local missing=0 broken=0
+  say "root      $ROOT"
+  say "compose   $COMPOSE_FILE"
+  if have docker; then say "docker    $(docker --version 2>/dev/null)"
+  else warn "docker    missing — install Docker Desktop"; missing=1; fi
+  if docker compose version >/dev/null 2>&1; then say "plugin    $(docker compose version --short 2>/dev/null)"
+  else warn "plugin    compose v2 missing"; missing=1; fi
+  if docker info >/dev/null 2>&1; then say "daemon    running"
+  else warn "daemon    not running — start Docker Desktop"; broken=1; fi
+  if [ ! -f "$COMPOSE_FILE" ]; then warn "stack     no compose file at $COMPOSE_FILE"; broken=1
+  elif ! have docker; then say "stack     $COMPOSE_FILE"
+  else                                 # ask compose what is declared rather than grepping for it
+    local declared=""
+    declared=$(docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | tr '\n' ' ' || true)
+    if [ -n "$declared" ]; then say "stack     ${declared% }"
+    else warn "stack     $COMPOSE_FILE does not parse"; broken=1; fi
+  fi
+  if have java; then say "java      $(java -version 2>&1 | head -1)"
+  else warn "java      missing — needed by ./mvnw for \`$PROG test\` and \`$PROG clean\`"; missing=1; fi
+  if have node; then say "node      $(node --version 2>/dev/null)"
+  else note "node      missing — only needed to run the frontend outside Docker"; fi
+  if have curl; then say "curl      present"
+  else warn "curl      missing — \`$PROG verify\` needs it"; missing=1; fi
+  [ "$missing" -eq 0 ] || die "something it depends on is not installed" 3
+  [ "$broken" -eq 0 ] || die "everything is installed, but something is not set up right" 4
+  say "all good"
+}
+cmd_doctor_help() { say "  Exits 3 when a dependency is missing and 4 when one is installed but unusable,"
+                    say "  so the exit code is the answer. \`$PROG status\` is the one that reports state."; }
+cmd_version() {
+  no_args "$@"
+  say "$PROG $VERSION"
+  local project=""
+  project=$(sed -n 's|^[[:space:]]*<version>\(.*\)</version>.*|\1|p' "$ROOT/pom.xml" 2>/dev/null | sed -n 2p || true)
+  [ -z "$project" ] || say "project  $project"
+}
+# ── dispatcher: resolution only, no command logic ──
+main() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -n|--dry-run) DRY_RUN=1 ;;    -y|--yes)     ASSUME_YES=1 ;;
+      -v|--verbose) VERBOSE=1 ;;    -V|--version) cmd_version; return 0 ;;
+      -h|--help)    usage; return 0 ;;
+      --) shift; break ;;
+      -*) warn "unknown global option: $1"; usage >&2; exit 2 ;;
+      *)  break ;;
+    esac
+    shift
+  done
+  if [ $# -eq 0 ]; then usage; return 0; fi    # bare invocation: help on stdout, exit 0
+  local name fn hint
+  name=$(lookup "$1" "${2:-}")
+  if [ -z "$name" ]; then
+    warn "unknown command: $1"
+    if valid_target "$1"; then note "'$1' is a target, not a command — try: ./$PROG start $1"; fi
+    hint=$(suggest "$1"); [ -z "$hint" ] || note "did you mean: ./$PROG $hint"
+    usage >&2; exit 2
+  fi
+  shift; case "$name" in *' '*) shift ;; esac  # a namespace consumes its second token
+  if wants_help "$@"; then                     # one place makes `<cmd> --help` universal
+    # shellcheck disable=SC2086  # deliberate split so "db reset" arrives as two words
+    cmd_help $name; return 0
+  fi
+  CURRENT_CMD="$name"; fn=$(fn_of "$name")
+  "$fn" "$@"
+}
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

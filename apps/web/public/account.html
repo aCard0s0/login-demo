@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account &middot; login-demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header></header>
+
+  <main>
+    <h1>Your account</h1>
+    <form id="account-form">
+      <label>Name<input id="name" autocomplete="name" required></label>
+      <label>Email<input id="email" type="email" autocomplete="username" required></label>
+      <label>
+        New password
+        <input id="new-password" type="password" autocomplete="new-password" minlength="8"
+               placeholder="leave blank to keep the one you have">
+      </label>
+      <label>
+        Current password
+        <input id="current-password" type="password" autocomplete="current-password" required>
+        <small>Required for any change, so a borrowed tab cannot take the account over.</small>
+      </label>
+      <button>Save changes</button>
+    </form>
+    <p class="error" id="error"></p>
+    <p class="ok" id="saved"></p>
+
+    <p class="note">
+      Changing your email does not strand your todos: todo-service keys them by your account id, which never
+      changes. Your token still carries the old email until it expires, which is harmless because nothing
+      reads it.
+    </p>
+  </main>
+
+<script type="module">
+import { $, api, requireLogin, renderNav } from '/app.js';
+
+if (requireLogin()) {
+  const load = async () => {
+    const me = await api('/api/accounts/me');
+    $('name').value = me.name;
+    $('email').value = me.email;
+  };
+
+  $('account-form').onsubmit = async (e) => {
+    e.preventDefault();
+    $('error').textContent = '';
+    $('saved').textContent = '';
+    try {
+      const updated = await api('/api/accounts/me', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: $('name').value,
+          email: $('email').value,
+          currentPassword: $('current-password').value,
+          newPassword: $('new-password').value,
+        }),
+      });
+      // The token still says the old name, so keep the header honest from the response instead.
+      sessionStorage.setItem('name', updated.name);
+      renderNav();
+      $('current-password').value = '';
+      $('new-password').value = '';
+      $('saved').textContent = 'Saved.';
+    } catch (err) {
+      $('error').textContent = err.message;
+    }
+  };
+
+  load().catch((err) => { $('error').textContent = err.message; });
+}
+</script>
+</body>
+</html>
