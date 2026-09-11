@@ -1,81 +1,57 @@
 package com.demo.todoservice;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.RestClient;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
 @RequestMapping("/api/todos")
 public class TodoController {
 
-    public record Todo(long id, String title, boolean done) {}
+    private final TodoService todos;
+    private final AuthClient auth;
+
+    public TodoController(TodoService todos, AuthClient auth) {
+        this.todos = todos;
+        this.auth = auth;
+    }
 
     public record NewTodo(String title) {}
 
-    private final Map<String, List<Todo>> byUser = new ConcurrentHashMap<>();
-    private final AtomicLong ids = new AtomicLong();
-    private final RestClient auth;
-
-    public TodoController(@Value("${auth.url}") String authUrl) {
-        this.auth = RestClient.create(authUrl);
-    }
-
-    /** Resolves the bearer token against auth-service. Throws 401 if it is not a live session. */
-    private String user(String authorization) {
-        String token = authorization == null ? "" : authorization.replaceFirst("(?i)^Bearer ", "");
-        try {
-            Map<?, ?> body = auth.get()
-                    .uri(b -> b.path("/api/verify").queryParam("token", token).build())
-                    .retrieve()
-                    .body(Map.class);
-            return (String) body.get("username");
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid token");
+    public record TodoResponse(Long id, String title, boolean done) {
+        static TodoResponse of(Todo t) {
+            return new TodoResponse(t.getId(), t.getTitle(), t.isDone());
         }
-    }
-
-    private List<Todo> list(String user) {
-        return byUser.computeIfAbsent(user, k -> new java.util.concurrent.CopyOnWriteArrayList<>());
     }
 
     @GetMapping
-    public List<Todo> all(@RequestHeader(value = "Authorization", required = false) String authz) {
-        return list(user(authz));
+    public List<TodoResponse> all(@RequestHeader(value = "Authorization", required = false) String authz) {
+        return todos.list(auth.ownerOf(authz)).stream().map(TodoResponse::of).toList();
     }
 
     @PostMapping
-    public Todo add(@RequestHeader(value = "Authorization", required = false) String authz,
-                    @RequestBody NewTodo in) {
-        Todo todo = new Todo(ids.incrementAndGet(), in.title(), false);
-        list(user(authz)).add(todo);
-        return todo;
+    public TodoResponse add(@RequestHeader(value = "Authorization", required = false) String authz,
+                            @RequestBody NewTodo in) {
+        return TodoResponse.of(todos.add(auth.ownerOf(authz), in.title()));
     }
 
     @PutMapping("/{id}")
-    public Todo toggle(@RequestHeader(value = "Authorization", required = false) String authz,
-                       @PathVariable long id) {
-        List<Todo> todos = list(user(authz));
-        for (int i = 0; i < todos.size(); i++) {
-            Todo t = todos.get(i);
-            if (t.id() == id) {
-                Todo flipped = new Todo(t.id(), t.title(), !t.done());
-                todos.set(i, flipped);
-                return flipped;
-            }
-        }
-        throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+    public TodoResponse toggle(@RequestHeader(value = "Authorization", required = false) String authz,
+                               @PathVariable Long id) {
+        return TodoResponse.of(todos.toggle(auth.ownerOf(authz), id));
     }
 
     @DeleteMapping("/{id}")
     public void delete(@RequestHeader(value = "Authorization", required = false) String authz,
-                       @PathVariable long id) {
-        list(user(authz)).removeIf(t -> t.id() == id);
+                       @PathVariable Long id) {
+        todos.delete(auth.ownerOf(authz), id);
     }
 }

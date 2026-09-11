@@ -1,0 +1,5 @@
+# SQLite files live here; the folder itself is tracked so the services can start.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

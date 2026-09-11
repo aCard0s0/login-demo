@@ -8,13 +8,14 @@
     :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
     body { max-width: 34rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
     input, button { font: inherit; padding: .4rem .6rem; }
-    form { display: flex; gap: .5rem; margin: 1rem 0; }
-    form input { flex: 1; }
+    form { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+    form input { flex: 1 1 8rem; }
     ul { list-style: none; padding: 0; }
     li { display: flex; gap: .5rem; align-items: center; padding: .3rem 0; }
     li span { flex: 1; }
     li.done span { text-decoration: line-through; opacity: .5; }
     .error { color: #c00; }
+    .switch { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -23,12 +24,24 @@
 
   <section id="login-view">
     <form id="login-form">
-      <input id="username" placeholder="username" autocomplete="username" required>
-      <input id="password" type="password" placeholder="password" autocomplete="current-password" required>
+      <input id="login-email" type="email" placeholder="email" autocomplete="username" required>
+      <input id="login-password" type="password" placeholder="password" autocomplete="current-password" required>
       <button>Log in</button>
     </form>
     <p class="error" id="login-error"></p>
-    <p><small>Try <code>demo</code> / <code>demo</code></small></p>
+    <p><small>No account? <button class="switch" id="to-register">Create one</button></small></p>
+  </section>
+
+  <section id="register-view" hidden>
+    <form id="register-form">
+      <input id="register-name" placeholder="name" autocomplete="name" required>
+      <input id="register-email" type="email" placeholder="email" autocomplete="username" required>
+      <input id="register-password" type="password" placeholder="password (8+ characters)"
+             autocomplete="new-password" minlength="8" required>
+      <button>Create account</button>
+    </form>
+    <p class="error" id="register-error"></p>
+    <p><small>Already registered? <button class="switch" id="to-login">Log in</button></small></p>
   </section>
 
   <section id="todo-view" hidden>
@@ -43,7 +56,7 @@
 <script type="module">
 const $ = (id) => document.getElementById(id);
 let token = sessionStorage.getItem('token');
-let username = sessionStorage.getItem('username');
+let name = sessionStorage.getItem('name');
 
 const api = async (path, options = {}) => {
   const res = await fetch(path, {
@@ -54,15 +67,18 @@ const api = async (path, options = {}) => {
   // Handlers returning void (DELETE) send 200 with an empty body, so parse only when there is one.
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new Error(body?.error || res.statusText);
+  if (!res.ok) throw new Error(body?.error || body?.message || res.statusText);
   return body;
 };
 
+// Which of the three panels is on screen. Only the todo view needs data.
+let showRegister = false;
 const render = async () => {
-  $('login-view').hidden = !!token;
+  $('login-view').hidden = !!token || showRegister;
+  $('register-view').hidden = !!token || !showRegister;
   $('todo-view').hidden = !token;
   if (!token) return;
-  $('who').textContent = username;
+  $('who').textContent = name;
   const todos = await api('/api/todos');
   $('todos').replaceChildren(...todos.map((t) => {
     const li = document.createElement('li');
@@ -79,24 +95,44 @@ const render = async () => {
 
 function logout() {
   if (token) fetch(`/api/logout?token=${token}`, { method: 'POST' }).catch(() => {});
-  token = username = null;
+  token = name = null;
   sessionStorage.clear();
+  showRegister = false;
   render();
 }
+
+const signIn = async (email, password) => {
+  const body = JSON.stringify({ email, password });
+  ({ token, name } = await api('/api/login', { method: 'POST', body }));
+  sessionStorage.setItem('token', token);
+  sessionStorage.setItem('name', name);
+};
 
 $('login-form').onsubmit = async (e) => {
   e.preventDefault();
   $('login-error').textContent = '';
   try {
-    const body = JSON.stringify({ username: $('username').value, password: $('password').value });
-    const out = await api('/api/login', { method: 'POST', body });
-    ({ token, username } = out);
-    sessionStorage.setItem('token', token);
-    sessionStorage.setItem('username', username);
+    await signIn($('login-email').value, $('login-password').value);
     $('login-form').reset();
     render();
   } catch (err) {
     $('login-error').textContent = err.message;
+  }
+};
+
+$('register-form').onsubmit = async (e) => {
+  e.preventDefault();
+  $('register-error').textContent = '';
+  const email = $('register-email').value;
+  const password = $('register-password').value;
+  try {
+    const body = JSON.stringify({ name: $('register-name').value, email, password });
+    await api('/api/accounts', { method: 'POST', body });
+    await signIn(email, password); // straight in, no second trip through the login form
+    $('register-form').reset();
+    render();
+  } catch (err) {
+    $('register-error').textContent = err.message;
   }
 };
 
@@ -107,6 +143,8 @@ $('todo-form').onsubmit = async (e) => {
   render();
 };
 
+$('to-register').onclick = () => { showRegister = true; $('login-error').textContent = ''; render(); };
+$('to-login').onclick = () => { showRegister = false; $('register-error').textContent = ''; render(); };
 $('logout').onclick = logout;
 render();
 </script>

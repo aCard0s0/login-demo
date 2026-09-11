@@ -1,46 +1,67 @@
 package com.demo.authservice;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api")
 public class AuthController {
 
-    // ponytail: demo credentials and in-memory sessions. Swap for a user store + JWT when this stops being a demo.
-    private static final Map<String, String> USERS = Map.of("demo", "demo", "alice", "wonderland");
+    private final AuthService auth;
 
-    private final Map<String, String> sessions = new ConcurrentHashMap<>();
+    public AuthController(AuthService auth) {
+        this.auth = auth;
+    }
 
-    public record LoginRequest(String username, String password) {}
+    public record NewAccount(String name, String email, String password) {}
 
-    public record LoginResponse(String token, String username) {}
+    public record AccountResponse(Long id, String name, String email) {}
+
+    public record LoginRequest(String email, String password) {}
+
+    public record LoginResponse(String token, String name, String email) {}
+
+    @PostMapping("/accounts")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AccountResponse register(@RequestBody NewAccount req) {
+        Account saved = auth.register(req.name(), req.email(), req.password());
+        return new AccountResponse(saved.getId(), saved.getName(), saved.getEmail());
+    }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest req) {
-        if (req.username() == null || !req.password().equals(USERS.get(req.username()))) {
-            return ResponseEntity.status(401).body(Map.of("error", "invalid credentials"));
-        }
-        String token = UUID.randomUUID().toString();
-        sessions.put(token, req.username());
-        return ResponseEntity.ok(new LoginResponse(token, req.username()));
+        return auth.login(req.email(), req.password())
+                .<ResponseEntity<?>>map(s -> ResponseEntity.ok(
+                        new LoginResponse(s.token(), s.account().getName(), s.account().getEmail())))
+                .orElseGet(() -> ResponseEntity.status(401).body(Map.of("error", "invalid credentials")));
     }
 
-    /** Called by other services to resolve a token to a username. 200 + username, or 401. */
+    /** Called by other services to resolve a token to its owner. 200 + account, or 401. */
     @GetMapping("/verify")
     public ResponseEntity<?> verify(@RequestParam String token) {
-        String username = sessions.get(token);
-        return username == null
-                ? ResponseEntity.status(401).build()
-                : ResponseEntity.ok(Map.of("username", username));
+        return auth.verify(token)
+                .<ResponseEntity<?>>map(a -> ResponseEntity.ok(Map.of("email", a.getEmail(), "name", a.getName())))
+                .orElseGet(() -> ResponseEntity.status(401).build());
     }
 
     @PostMapping("/logout")
     public void logout(@RequestParam String token) {
-        sessions.remove(token);
+        auth.logout(token);
+    }
+
+    /** Turns the service's rejections into the {error} shape the frontend already renders. */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<?> badRequest(IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
     }
 }
