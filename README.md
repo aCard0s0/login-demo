@@ -79,6 +79,36 @@ development values and the `db` container publishes no port; change them before 
 Tests are the exception: they run against a throwaway SQLite file so `./mvnw test` needs nothing installed
 or running. That means the test suite does not exercise the same database the services actually use.
 
+### Resources
+
+Every container is capped, and the caps are measured rather than guessed. Under a burst of 200
+authenticated reads and 40 logins the whole stack sits at 490 MiB with nothing OOM-killed:
+
+| Container | `mem_limit` | measured | `cpus` |
+|---|---|---|---|
+| auth-service | 288m | ~205 MiB (71%) | 1.0 |
+| todo-service | 288m | ~206 MiB (71%) | 1.0 |
+| db | 192m | ~68 MiB (35%) | 0.5 |
+| web | 64m | ~18 MiB (27%) | 0.5 |
+
+The two services are the floor, not the ceiling: a JVM's resident size is mostly metaspace, code cache,
+thread stacks and the GC's own structures, none of which shrink much for a small application. Both run
+with `-XX:MaxRAMPercentage=50`, so the heap is half the limit and the rest of that list has somewhere to
+live -- the JVM reads the cgroup limit, so `mem_limit` is what actually sizes the heap. Postgres cannot go
+much under 192m either, because `shared_buffers` alone defaults to 128MB.
+
+`cpus` matters most at startup, which is the only CPU-hungry moment either service has; BCrypt at cost 10
+is the other, at roughly a tenth of a second per login.
+
+To re-measure after a change:
+
+```bash
+./login-demo start
+./login-demo verify
+docker stats --no-stream $(docker compose -p login-demo ps -q)
+docker inspect login-demo-auth-service-1 --format '{{.State.OOMKilled}}'
+```
+
 ## Roles
 
 Four of them, on the account row and carried in the token: `ADMIN`, `MODERATOR`, `AGENT`, `USER`.
