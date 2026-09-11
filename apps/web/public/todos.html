@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Todos &middot; login-demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header></header>
+
+  <main>
+    <h1>Your todos</h1>
+    <form id="todo-form">
+      <input id="title" placeholder="What needs doing?" required>
+      <button>Add</button>
+    </form>
+    <p class="error" id="error"></p>
+    <ul id="todos"></ul>
+    <p class="note" id="empty" hidden>Nothing here yet.</p>
+
+    <p class="note">
+      todo-service never asked auth-service who you are. It checked your token's signature against the
+      public key auth-service publishes, then scoped every query to the account id inside it.
+    </p>
+  </main>
+
+<script type="module">
+import { $, api, requireLogin } from '/app.js';
+
+if (requireLogin()) {
+  const render = async () => {
+    const todos = await api('/api/todos');
+    $('empty').hidden = todos.length > 0;
+    $('todos').replaceChildren(...todos.map((t) => {
+      const li = document.createElement('li');
+      li.className = t.done ? 'done' : '';
+      const box = Object.assign(document.createElement('input'), { type: 'checkbox', checked: t.done });
+      box.onclick = () => run(() => api(`/api/todos/${t.id}`, { method: 'PUT' }));
+      const label = Object.assign(document.createElement('span'), { textContent: t.title });
+
+      // Renaming swaps the title for an input in place: Enter or clicking away saves, Escape puts it back.
+      const rename = () => {
+        const input = Object.assign(document.createElement('input'), { type: 'text', value: t.title });
+        const close = (save) => {
+          input.onblur = null;                    // the re-render pulls the input out; do not save twice
+          if (save && input.value !== t.title) {
+            run(() => api(`/api/todos/${t.id}`, { method: 'PATCH', body: JSON.stringify({ title: input.value }) }));
+          } else {
+            input.replaceWith(label);             // nothing to change, so nothing to ask the server
+          }
+        };
+        input.onblur = () => close(true);
+        input.onkeydown = (e) => {
+          if (e.key === 'Enter') close(true);
+          if (e.key === 'Escape') close(false);
+        };
+        label.replaceWith(input);
+        input.focus();
+        input.select();
+      };
+      label.onclick = rename;
+
+      // A button as well as the clickable title, so renaming is reachable from the keyboard too.
+      const edit = Object.assign(document.createElement('button'), { textContent: '✎' });
+      edit.setAttribute('aria-label', `Rename ${t.title}`);
+      edit.onclick = rename;
+      const del = Object.assign(document.createElement('button'), { textContent: '×' });
+      del.setAttribute('aria-label', `Delete ${t.title}`);
+      del.onclick = () => run(() => api(`/api/todos/${t.id}`, { method: 'DELETE' }));
+      li.append(box, label, edit, del);
+      return li;
+    }));
+  };
+
+  const run = async (action) => {
+    $('error').textContent = '';
+    try {
+      await action();
+      await render();
+    } catch (err) {
+      $('error').textContent = err.message;
+    }
+  };
+
+  $('todo-form').onsubmit = (e) => {
+    e.preventDefault();
+    const title = $('title').value;
+    run(async () => {
+      await api('/api/todos', { method: 'POST', body: JSON.stringify({ title }) });
+      $('todo-form').reset();
+    });
+  };
+
+  run(() => {});
+}
+</script>
+</body>
+</html>

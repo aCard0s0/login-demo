@@ -4,149 +4,51 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>login-demo</title>
-  <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { max-width: 34rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
-    input, button { font: inherit; padding: .4rem .6rem; }
-    form { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
-    form input { flex: 1 1 8rem; }
-    ul { list-style: none; padding: 0; }
-    li { display: flex; gap: .5rem; align-items: center; padding: .3rem 0; }
-    li span { flex: 1; }
-    li.done span { text-decoration: line-through; opacity: .5; }
-    .error { color: #c00; }
-    .switch { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; }
-    [hidden] { display: none !important; }
-  </style>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <h1>login-demo</h1>
+  <header></header>
 
-  <section id="login-view">
-    <form id="login-form">
-      <input id="login-email" type="email" placeholder="email" autocomplete="username" required>
-      <input id="login-password" type="password" placeholder="password" autocomplete="current-password" required>
-      <button>Log in</button>
-    </form>
-    <p class="error" id="login-error"></p>
-    <p><small>No account? <button class="switch" id="to-register">Create one</button></small></p>
-  </section>
+  <main>
+    <h1>login-demo</h1>
+    <p>
+      Two Spring Boot services behind one Node origin. <b>auth-service</b> owns accounts and signs
+      RS256 tokens; <b>todo-service</b> verifies them against auth-service's published public key and
+      keeps every query scoped to the account that made it.
+    </p>
 
-  <section id="register-view" hidden>
-    <form id="register-form">
-      <input id="register-name" placeholder="name" autocomplete="name" required>
-      <input id="register-email" type="email" placeholder="email" autocomplete="username" required>
-      <input id="register-password" type="password" placeholder="password (8+ characters)"
-             autocomplete="new-password" minlength="8" required>
-      <button>Create account</button>
-    </form>
-    <p class="error" id="register-error"></p>
-    <p><small>Already registered? <button class="switch" id="to-login">Log in</button></small></p>
-  </section>
+    <h2>Right now</h2>
+    <div class="stats">
+      <div><b id="accounts">&middot;&middot;&middot;</b><small>accounts registered</small></div>
+      <div><b id="todos">&middot;&middot;&middot;</b><small>todos written</small></div>
+    </div>
+    <p class="error" id="error"></p>
+    <p class="note">
+      These two numbers are the only thing either service will tell you without a token. Everything else
+      needs one.
+    </p>
 
-  <section id="todo-view" hidden>
-    <p>Signed in as <b id="who"></b> — <button id="logout">log out</button></p>
-    <form id="todo-form">
-      <input id="title" placeholder="What needs doing?" required>
-      <button>Add</button>
-    </form>
-    <ul id="todos"></ul>
-  </section>
+    <p id="cta"></p>
+  </main>
 
 <script type="module">
-const $ = (id) => document.getElementById(id);
-let token = sessionStorage.getItem('token');
-let name = sessionStorage.getItem('name');
+import { $, api, token } from '/app.js';
 
-const api = async (path, options = {}) => {
-  const res = await fetch(path, {
-    ...options,
-    headers: { 'content-type': 'application/json', ...(token && { authorization: `Bearer ${token}` }), ...options.headers },
-  });
-  if (res.status === 401 && token) { logout(); throw new Error('session expired'); } // a 401 with no token is a failed login, not an expiry
-  // Handlers returning void (DELETE) send 200 with an empty body, so parse only when there is one.
-  const text = await res.text();
-  const body = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new Error(body?.error || body?.message || res.statusText);
-  return body;
-};
-
-// Which of the three panels is on screen. Only the todo view needs data.
-let showRegister = false;
-const render = async () => {
-  $('login-view').hidden = !!token || showRegister;
-  $('register-view').hidden = !!token || !showRegister;
-  $('todo-view').hidden = !token;
-  if (!token) return;
-  $('who').textContent = name;
-  const todos = await api('/api/todos');
-  $('todos').replaceChildren(...todos.map((t) => {
-    const li = document.createElement('li');
-    li.className = t.done ? 'done' : '';
-    const box = Object.assign(document.createElement('input'), { type: 'checkbox', checked: t.done });
-    box.onclick = () => api(`/api/todos/${t.id}`, { method: 'PUT' }).then(render);
-    const label = Object.assign(document.createElement('span'), { textContent: t.title });
-    const del = Object.assign(document.createElement('button'), { textContent: '×' });
-    del.onclick = () => api(`/api/todos/${t.id}`, { method: 'DELETE' }).then(render);
-    li.append(box, label, del);
-    return li;
-  }));
-};
-
-function logout() {
-  if (token) fetch(`/api/logout?token=${token}`, { method: 'POST' }).catch(() => {});
-  token = name = null;
-  sessionStorage.clear();
-  showRegister = false;
-  render();
+const cta = $('cta');
+if (token()) {
+  cta.innerHTML = '<a href="/todos">Go to your todos</a>';
+} else {
+  cta.innerHTML = '<a href="/login">Log in or create an account</a>';
 }
 
-const signIn = async (email, password) => {
-  const body = JSON.stringify({ email, password });
-  ({ token, name } = await api('/api/login', { method: 'POST', body }));
-  sessionStorage.setItem('token', token);
-  sessionStorage.setItem('name', name);
-};
-
-$('login-form').onsubmit = async (e) => {
-  e.preventDefault();
-  $('login-error').textContent = '';
-  try {
-    await signIn($('login-email').value, $('login-password').value);
-    $('login-form').reset();
-    render();
-  } catch (err) {
-    $('login-error').textContent = err.message;
-  }
-};
-
-$('register-form').onsubmit = async (e) => {
-  e.preventDefault();
-  $('register-error').textContent = '';
-  const email = $('register-email').value;
-  const password = $('register-password').value;
-  try {
-    const body = JSON.stringify({ name: $('register-name').value, email, password });
-    await api('/api/accounts', { method: 'POST', body });
-    await signIn(email, password); // straight in, no second trip through the login form
-    $('register-form').reset();
-    render();
-  } catch (err) {
-    $('register-error').textContent = err.message;
-  }
-};
-
-$('todo-form').onsubmit = async (e) => {
-  e.preventDefault();
-  await api('/api/todos', { method: 'POST', body: JSON.stringify({ title: $('title').value }) });
-  $('todo-form').reset();
-  render();
-};
-
-$('to-register').onclick = () => { showRegister = true; $('login-error').textContent = ''; render(); };
-$('to-login').onclick = () => { showRegister = false; $('register-error').textContent = ''; render(); };
-$('logout').onclick = logout;
-render();
+try {
+  // Two services, two counts: neither one can see the other's database.
+  const [accounts, todos] = await Promise.all([api('/api/public/stats'), api('/api/public/todos/stats')]);
+  $('accounts').textContent = accounts.accounts;
+  $('todos').textContent = todos.todos;
+} catch (err) {
+  $('error').textContent = `Could not reach a service: ${err.message}`;
+}
 </script>
 </body>
 </html>

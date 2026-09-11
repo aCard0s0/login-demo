@@ -1,0 +1,73 @@
+# Only web publishes a port. The two services and the database talk over the compose network,
+# which is the same shape as production: the browser reaches everything through the one origin.
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      # Postgres 18+ puts the cluster in a major-version subdirectory, so the mount goes one
+      # level up at /var/lib/postgresql. The pre-18 path (.../data) is refused outright.
+      - db-data:/var/lib/postgresql
+      - ./docker/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  auth-service:
+    build:
+      context: .
+      target: auth-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/auth
+      SPRING_DATASOURCE_USERNAME: auth
+      SPRING_DATASOURCE_PASSWORD: auth
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9081/api/public/stats || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  todo-service:
+    build:
+      context: .
+      target: todo-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/todo
+      SPRING_DATASOURCE_USERNAME: todo
+      SPRING_DATASOURCE_PASSWORD: todo
+      # Only the public half of the signing key ever crosses this network.
+      AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
+    depends_on:
+      db:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9082/api/public/todos/stats || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      target: web
+    environment:
+      AUTH_URL: http://auth-service:9081
+      TODO_URL: http://todo-service:9082
+    ports:
+      - "3000:3000"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      todo-service:
+        condition: service_healthy
+
+volumes:
+  db-data:

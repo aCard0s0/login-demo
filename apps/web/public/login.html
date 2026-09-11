@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in &middot; login-demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header></header>
+
+  <main>
+    <section id="login-view">
+      <h1>Log in</h1>
+      <form id="login-form">
+        <input id="login-email" type="email" placeholder="email" autocomplete="username" required>
+        <input id="login-password" type="password" placeholder="password" autocomplete="current-password" required>
+        <button>Log in</button>
+      </form>
+      <p class="error" id="login-error"></p>
+      <p><small>No account? <button class="link" id="to-register">Create one</button></small></p>
+    </section>
+
+    <section id="register-view" hidden>
+      <h1>Create an account</h1>
+      <form id="register-form">
+        <input id="register-name" placeholder="name" autocomplete="name" required>
+        <input id="register-email" type="email" placeholder="email" autocomplete="username" required>
+        <input id="register-password" type="password" placeholder="password (8+ characters)"
+               autocomplete="new-password" minlength="8" required>
+        <button>Create account</button>
+      </form>
+      <p class="error" id="register-error"></p>
+      <p><small>Already registered? <button class="link" id="to-login">Log in</button></small></p>
+    </section>
+
+    <p class="note">
+      Five wrong passwords for one email locks it for 15 minutes, correct password included.
+    </p>
+  </main>
+
+<script type="module">
+import { $, api, setSession, token } from '/app.js';
+
+if (token()) location.href = '/todos';
+
+if (location.search.includes('expired')) $('login-error').textContent = 'Your session expired, log in again.';
+
+const show = (registering) => {
+  $('login-view').hidden = registering;
+  $('register-view').hidden = !registering;
+};
+
+const signIn = async (email, password) => {
+  const body = JSON.stringify({ email, password });
+  const { token: value, name } = await api('/api/login', { method: 'POST', body });
+  setSession(value, name);
+  location.href = '/todos';
+};
+
+$('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  $('login-error').textContent = '';
+  try {
+    await signIn($('login-email').value, $('login-password').value);
+  } catch (err) {
+    $('login-error').textContent = err.message;
+  }
+};
+
+$('register-form').onsubmit = async (e) => {
+  e.preventDefault();
+  $('register-error').textContent = '';
+  const email = $('register-email').value;
+  const password = $('register-password').value;
+  try {
+    const body = JSON.stringify({ name: $('register-name').value, email, password });
+    await api('/api/accounts', { method: 'POST', body });
+    await signIn(email, password); // straight in, no second trip through the login form
+  } catch (err) {
+    $('register-error').textContent = err.message;
+  }
+};
+
+$('to-register').onclick = () => { $('login-error').textContent = ''; show(true); };
+$('to-login').onclick = () => { $('register-error').textContent = ''; show(false); };
+</script>
+</body>
+</html>
