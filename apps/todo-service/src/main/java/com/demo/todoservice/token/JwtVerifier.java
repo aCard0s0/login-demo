@@ -5,6 +5,7 @@ import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.jwk.source.JWKSourceBuilder;
 import com.nimbusds.jose.proc.JWSVerificationKeySelector;
 import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier;
 import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import com.nimbusds.jwt.proc.JWTProcessor;
@@ -38,11 +39,14 @@ public class JwtVerifier {
         this.jwt = processor;
     }
 
-    /** The account id behind the Authorization header, or 401 if the token does not check out. */
-    public String ownerOf(String authorization) {
+    /** Who is behind the Authorization header, or 401 if the token does not check out. */
+    public Caller callerOf(String authorization) {
         String token = authorization == null ? "" : authorization.replaceFirst("(?i)^Bearer ", "");
         try {
-            return jwt.process(token, null).getSubject();
+            JWTClaimsSet claims = jwt.process(token, null);
+            // A token with no role claim is read as a plain user: least privilege, rather than a 500.
+            Object role = claims.getClaim("role");
+            return new Caller(claims.getSubject(), role == null ? "USER" : String.valueOf(role));
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid or expired token");
         }

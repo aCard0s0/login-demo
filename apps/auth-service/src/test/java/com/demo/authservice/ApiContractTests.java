@@ -24,6 +24,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.jpa.hibernate.ddl-auto=create-drop",
         // SQLite allows a single writer; one connection keeps Hibernate from tripping over itself.
         "spring.datasource.hikari.maximum-pool-size=1",
+        // What compose passes in from .env. Set here too, so the seeded admin is part of the contract.
+        "admin.email=admin@example.com",
+        "admin.password=admin-pass-01",
 })
 @AutoConfigureMockMvc
 class ApiContractTests {
@@ -37,7 +40,8 @@ class ApiContractTests {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.name").value(name))
-                .andExpect(jsonPath("$.email").value(email));
+                .andExpect(jsonPath("$.email").value(email))
+                .andExpect(jsonPath("$.role").value("USER"));
         return login(email, password);
     }
 
@@ -48,6 +52,18 @@ class ApiContractTests {
                 .andExpect(jsonPath("$.token").isString())
                 .andReturn().getResponse().getContentAsString();
         return body.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+    }
+
+    /** The id behind a token, which is the only way this test can name an account it did not seed. */
+    private long idOf(String token) throws Exception {
+        String body = mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return Long.parseLong(body.replaceAll(".*\"id\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private static String role(String role) {
+        return "{\"role\":\"" + role + "\"}";
     }
 
     private static String json(String name, String email, String password) {
@@ -148,5 +164,38 @@ class ApiContractTests {
                 .andExpect(jsonPath("$.keys[0].n").isString())
                 .andExpect(jsonPath("$.keys[0].d").doesNotExist())
                 .andExpect(jsonPath("$.keys[0].p").doesNotExist());
+    }
+
+    @Test
+    void theAdminFromTheEnvironmentIsThereAndIsTheOnlyOneWhoCanChangeARole() throws Exception {
+        String admin = login("admin@example.com", "admin-pass-01");
+        String user = register("Mary", "mary@example.com", "jackson-1921");
+        long maryId = idOf(user);
+
+        mvc.perform(get("/api/accounts").header("Authorization", "Bearer " + user))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").isString());
+        mvc.perform(put("/api/accounts/" + maryId + "/role").header("Authorization", "Bearer " + user)
+                        .contentType(MediaType.APPLICATION_JSON).content(role("ADMIN")))
+                .andExpect(status().isForbidden());
+        mvc.perform(put("/api/accounts/" + maryId + "/role")
+                        .contentType(MediaType.APPLICATION_JSON).content(role("ADMIN")))
+                .andExpect(status().isUnauthorized());
+
+        mvc.perform(put("/api/accounts/" + maryId + "/role").header("Authorization", "Bearer " + admin)
+                        .contentType(MediaType.APPLICATION_JSON).content(role("MODERATOR")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("MODERATOR"));
+
+        // The role is read from the account, not from the claims, so the token Mary already holds is enough.
+        mvc.perform(get("/api/accounts").header("Authorization", "Bearer " + user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").isNumber())
+                .andExpect(jsonPath("$[0].passwordHash").doesNotExist());
+
+        mvc.perform(put("/api/accounts/" + idOf(admin) + "/role").header("Authorization", "Bearer " + admin)
+                        .contentType(MediaType.APPLICATION_JSON).content(role("USER")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").isString());
     }
 }

@@ -3,6 +3,10 @@
 services:
   db:
     image: postgres:18-alpine
+    # Postgres' own floor is shared_buffers (128MB by default) plus a little per connection; the two
+    # services open one small Hikari pool each.
+    mem_limit: 192m
+    cpus: 0.5
     environment:
       POSTGRES_PASSWORD: postgres
     volumes:
@@ -20,10 +24,20 @@ services:
     build:
       context: .
       target: auth-service
+    # Measured, not guessed: see the resources section of the README for how to re-measure. The JVM reads
+    # the cgroup limit, so mem_limit is what sizes the heap -- at 50% of 288m that is a 144m heap, leaving
+    # the rest for metaspace, code cache, thread stacks and the GC itself.
+    mem_limit: 288m
+    cpus: 1.0
     environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=50
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/auth
       SPRING_DATASOURCE_USERNAME: auth
       SPRING_DATASOURCE_PASSWORD: auth
+      # The deployment's admin, seeded into the database at startup. Compose reads these from .env and
+      # refuses to start the stack without them, rather than quietly coming up with nobody in charge.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env — copy .env.example}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env — copy .env.example}
     depends_on:
       db:
         condition: service_healthy
@@ -37,7 +51,13 @@ services:
     build:
       context: .
       target: todo-service
+    # Measured, not guessed: see the resources section of the README for how to re-measure. The JVM reads
+    # the cgroup limit, so mem_limit is what sizes the heap -- at 50% of 288m that is a 144m heap, leaving
+    # the rest for metaspace, code cache, thread stacks and the GC itself.
+    mem_limit: 288m
+    cpus: 1.0
     environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=50
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/todo
       SPRING_DATASOURCE_USERNAME: todo
       SPRING_DATASOURCE_PASSWORD: todo
@@ -58,6 +78,9 @@ services:
     build:
       context: .
       target: web
+    # Plain node with no dependencies: it reads four small files and pipes sockets.
+    mem_limit: 64m
+    cpus: 0.5
     environment:
       AUTH_URL: http://auth-service:9081
       TODO_URL: http://todo-service:9082

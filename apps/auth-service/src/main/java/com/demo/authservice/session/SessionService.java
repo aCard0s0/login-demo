@@ -65,7 +65,8 @@ public class SessionService {
         }
         failures.remove(cleanEmail);
         Account found = account.get();
-        return Optional.of(new Session(tokens.issue(found.getId(), found.getEmail(), found.getName()), found));
+        return Optional.of(new Session(
+                tokens.issue(found.getId(), found.getEmail(), found.getName(), found.getRole().name()), found));
     }
 
     private boolean lockedOut(String email) {

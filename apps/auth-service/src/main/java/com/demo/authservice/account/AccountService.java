@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Optional;
 
 /** The account itself: who exists, what their details are, and which account a caller's token names. */
@@ -81,6 +82,55 @@ public class AccountService {
     /** How many accounts exist. Public: a count gives away nothing about who they are. */
     public long count() {
         return accounts.count();
+    }
+
+    /** Every account. Only ever reached by a role that {@link Role#readsEveryone()}; the controller checks that. */
+    public List<Account> all() {
+        return accounts.findAll();
+    }
+
+    /**
+     * Moves an account to another role. The caller is passed in so the one account that could lock everybody
+     * out -- an admin demoting itself, leaving nobody able to promote anyone again -- is refused here rather
+     * than relying on whoever writes the next controller to remember.
+     */
+    @Transactional
+    public Account changeRole(Account admin, Long accountId, Role role) {
+        if (role == null) {
+            throw new IllegalArgumentException("a role is required");
+        }
+        if (admin.getId().equals(accountId) && role != Role.ADMIN) {
+            throw new IllegalArgumentException("an admin cannot take its own admin rights away");
+        }
+        Account account = accounts.findById(accountId)
+                .orElseThrow(() -> new IllegalArgumentException("account not found"));
+        account.setRole(role);
+        return accounts.save(account);
+    }
+
+    /**
+     * Makes sure the deployment's admin exists, at startup, from the credentials in the environment.
+     *
+     * <p>Create-only on purpose. If the address is already registered it is promoted but its password is left
+     * exactly as it is, so a restart can never quietly reset a password the admin has since changed, and a
+     * stale value left in .env cannot hand the account back to whoever last read that file.
+     */
+    @Transactional
+    public Account ensureAdmin(String email, String password) {
+        String cleanEmail = cleanEmail(email);
+        Optional<Account> existing = accounts.findByEmail(cleanEmail);
+        if (existing.isPresent()) {
+            Account admin = existing.get();
+            if (admin.getRole() != Role.ADMIN) {
+                admin.setRole(Role.ADMIN);
+                return accounts.save(admin);
+            }
+            return admin;
+        }
+        checkPassword(password);
+        Account admin = new Account("Admin", cleanEmail, encoder.encode(password));
+        admin.setRole(Role.ADMIN);
+        return accounts.save(admin);
     }
 
     private static String cleanName(String name) {

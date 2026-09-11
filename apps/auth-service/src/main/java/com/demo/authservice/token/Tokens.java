@@ -45,10 +45,11 @@ public class Tokens {
     /**
      * A signed token naming the account. The id is the subject because it is the one thing that never changes.
      *
-     * <p>Takes the three fields rather than the Account itself, so this package stays free of any dependency on
-     * the account package and the arrow between them only ever points one way.
+     * <p>Takes the fields rather than the Account itself, so this package stays free of any dependency on
+     * the account package and the arrow between them only ever points one way. The role rides along as a
+     * plain string: it is what lets todo-service decide what a caller may touch without asking us.
      */
-    public String issue(Long accountId, String email, String name) {
+    public String issue(Long accountId, String email, String name, String role) {
         Instant now = Instant.now();
         SignedJWT jwt = new SignedJWT(
                 new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(),
@@ -56,6 +57,7 @@ public class Tokens {
                         .subject(String.valueOf(accountId))
                         .claim("email", email)
                         .claim("name", name)
+                        .claim("role", role)
                         .issueTime(Date.from(now))
                         .expirationTime(Date.from(now.plus(ttl)))
                         .build());

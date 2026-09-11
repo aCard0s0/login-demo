@@ -20,7 +20,9 @@ import java.time.Instant;
 import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The only thing standing between a stranger and somebody's todo list, so it is checked against a real JWKS
@@ -38,25 +40,37 @@ class JwtVerifierTests {
             JwtVerifier verifier = new JwtVerifier("http://localhost:" + jwks.getAddress().getPort() + "/jwks.json");
             Instant later = Instant.now().plusSeconds(300);
 
-            assertEquals("42", verifier.ownerOf("Bearer " + token(advertised, "42", later)));
+            Caller caller = verifier.callerOf("Bearer " + token(advertised, "42", later, "MODERATOR"));
+            assertEquals("42", caller.accountId());
+            assertEquals("MODERATOR", caller.role());
+            assertTrue(caller.readsEveryone());
+            assertFalse(caller.writesEveryone(), "only an admin writes everyone");
 
-            assertThrows(ResponseStatusException.class, () -> verifier.ownerOf(token(impostor, "42", later)),
+            // Nothing is obliged to put a role in a token, so its absence has to mean the smallest one.
+            Caller roleless = verifier.callerOf("Bearer " + token(advertised, "42", later, null));
+            assertEquals("USER", roleless.role());
+            assertFalse(roleless.readsEveryone());
+
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf(token(impostor, "42", later, "ADMIN")),
                     "a token signed by a key auth-service never published must not be accepted");
             // Past the 60s of clock skew the claims verifier allows by default.
             assertThrows(ResponseStatusException.class,
-                    () -> verifier.ownerOf("Bearer " + token(advertised, "42", Instant.now().minusSeconds(300))),
+                    () -> verifier.callerOf("Bearer " + token(advertised, "42", Instant.now().minusSeconds(300), "USER")),
                     "an expired token must not be accepted");
-            assertThrows(ResponseStatusException.class, () -> verifier.ownerOf(null));
-            assertThrows(ResponseStatusException.class, () -> verifier.ownerOf("Bearer not.a.token"));
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf(null));
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer not.a.token"));
         } finally {
             jwks.stop(0);
         }
     }
 
-    private static String token(RSAKey key, String subject, Instant expiry) throws Exception {
+    private static String token(RSAKey key, String subject, Instant expiry, String role) throws Exception {
+        JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder().subject(subject).expirationTime(Date.from(expiry));
+        if (role != null) {
+            claims.claim("role", role);
+        }
         SignedJWT jwt = new SignedJWT(
-                new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(),
-                new JWTClaimsSet.Builder().subject(subject).expirationTime(Date.from(expiry)).build());
+                new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(), claims.build());
         jwt.sign(new RSASSASigner(key));
         return jwt.serialize();
     }

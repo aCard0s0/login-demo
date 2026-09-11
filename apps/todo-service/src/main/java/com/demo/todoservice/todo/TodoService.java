@@ -1,5 +1,6 @@
 package com.demo.todoservice.todo;
 
+import com.demo.todoservice.token.Caller;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,17 +22,21 @@ public class TodoService {
         return todos.count();
     }
 
-    public List<Todo> list(String owner) {
-        return todos.findByOwnerOrderByIdAsc(owner);
+    /** The caller's own todos, or everybody's when the role says so. */
+    public List<Todo> list(Caller caller) {
+        return caller.readsEveryone()
+                ? todos.findAllByOrderByIdAsc()
+                : todos.findByOwnerOrderByIdAsc(caller.accountId());
     }
 
-    public Todo add(String owner, String title) {
-        return todos.save(new Todo(owner, cleanTitle(title)));
+    /** A todo is always created for the caller, whatever their role: there is no "add this to someone else". */
+    public Todo add(Caller caller, String title) {
+        return todos.save(new Todo(caller.accountId(), cleanTitle(title)));
     }
 
     @Transactional
-    public Todo toggle(String owner, Long id) {
-        Todo todo = mine(owner, id);
+    public Todo toggle(Caller caller, Long id) {
+        Todo todo = writable(caller, id);
         todo.setDone(!todo.isDone());
         return todos.save(todo);
     }
@@ -41,8 +46,8 @@ public class TodoService {
      * to send back a done flag it never touched -- and cannot flip one by omitting it.
      */
     @Transactional
-    public Todo update(String owner, Long id, String title, Boolean done) {
-        Todo todo = mine(owner, id);
+    public Todo update(Caller caller, Long id, String title, Boolean done) {
+        Todo todo = writable(caller, id);
         if (title != null) {
             todo.setTitle(cleanTitle(title));
         }
@@ -53,15 +58,19 @@ public class TodoService {
     }
 
     @Transactional
-    public void delete(String owner, Long id) {
-        if (todos.deleteByIdAndOwner(id, owner) == 0) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
+    public void delete(Caller caller, Long id) {
+        todos.delete(writable(caller, id));
     }
 
-    /** The caller's own todo, or 404. Someone else's id is "not found" rather than "forbidden", so neither leaks. */
-    private Todo mine(String owner, Long id) {
-        return todos.findByIdAndOwner(id, owner)
+    /**
+     * A todo this caller may change, or 404. A moderator reads everyone but writes only its own, so it lands
+     * on the owner-scoped lookup here just like a user does.
+     *
+     * <p>Someone else's id comes back "not found" rather than "forbidden", so neither answer says whether the
+     * todo exists.
+     */
+    private Todo writable(Caller caller, Long id) {
+        return (caller.writesEveryone() ? todos.findById(id) : todos.findByIdAndOwner(id, caller.accountId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
     }
 
