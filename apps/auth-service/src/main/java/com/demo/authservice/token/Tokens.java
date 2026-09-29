@@ -35,11 +35,14 @@ public class Tokens {
 
     private final RSAKey key;
 
+    private final RSASSAVerifier verifier;
+
     private final Duration ttl;
 
     public Tokens(@Value("${auth.token-ttl:30m}") Duration ttl) throws Exception {
         this.ttl = ttl;
         this.key = new RSAKeyGenerator(2048).keyID(UUID.randomUUID().toString()).generate();
+        this.verifier = new RSASSAVerifier(key.toPublicJWK());
     }
 
     /**
@@ -76,7 +79,7 @@ public class Tokens {
         }
         try {
             SignedJWT jwt = SignedJWT.parse(token);
-            if (!jwt.verify(new RSASSAVerifier(key.toPublicJWK()))) {
+            if (!jwt.verify(verifier)) {
                 return Optional.empty();
             }
             Date expiry = jwt.getJWTClaimsSet().getExpirationTime();

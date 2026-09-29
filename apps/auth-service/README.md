@@ -13,12 +13,11 @@ together, so a change to one subject stays in one folder.
 ```
 account/  Account  Role  AccountRepository  AccountService  AccountController  AdminSeeder
           AccountResponse  NewAccount  UpdateAccount  RoleChange
-session/  Session  SessionService  SessionController  TooManyAttemptsException
-          LoginRequest  LoginResponse
+session/  Session  SessionService  SessionController  LoginRequest  LoginResponse
 token/    Tokens  JwksController
 oauth/    OAuthProvider  OAuthProperties  OAuthService  OAuthController
 stats/    StatsController  PublicStats
-support/  AuthExceptionAdvice
+support/  AuthExceptionAdvice  AttemptWindow  TooManyAttemptsException
 ```
 
 The dependencies point one way: `token` <- `account` <- {`session`, `oauth`} -- the two ways in, neither
@@ -75,6 +74,8 @@ then have to be switched off. Only the hash is stored.
 - At least 8 characters, at most 72 **bytes**. BCrypt reads no further than 72, which would make any two
   passwords sharing a 72-byte prefix the same password, so the long ones are rejected rather than truncated
   behind the user's back.
+- Names and emails are at most 255 characters, the width of the column. Checked here so Postgres does not
+  answer the overflow with a misleading "already registered".
 - Emails are lowercased and must be unique. The unique index on `accounts.email` is the real guard, so two
   simultaneous registrations still come back as a 400 rather than a 500.
 - A login for an unknown email still runs one hash comparison against a dummy hash, so a missing account
@@ -83,6 +84,9 @@ then have to be switched off. Only the hash is stored.
   included. Per email rather than per IP, because every browser request arrives from the Node proxy and
   would otherwise share one counter -- the trade is that someone who knows an address can lock it out on
   purpose.
+- Registration is capped at 30 attempts per 15 minutes, service-wide, and answers 429 past that. Service-wide
+  rather than per client because every request arrives from the Node proxy under one address and the proxy
+  sets no `X-Forwarded-For`; the trade is that a run of bots makes honest registrations wait the window out.
 - Editing an account always requires the current password, even to change only the name, so a borrowed tab
   cannot quietly take an account over.
 
@@ -112,6 +116,9 @@ The things worth knowing:
   the provider echoes back. An attacker can make a browser visit the callback but cannot set a cookie on
   this origin, so the two halves cannot be made to agree. `SameSite=Lax`, not `Strict`: the callback is a
   cross-site top-level navigation, and `Strict` would withhold the cookie exactly when it is needed.
+- **The callback also carries PKCE.** A verifier is planted in a second cookie next to the state, the
+  provider is shown its SHA-256 on the way out, and the verifier itself travels only in the back-channel token
+  request. A code lifted from the redirect is worthless without the cookie that started it.
 - **The token comes back in the URL fragment**, not the query string, so it is never sent to a server,
   written to the proxy's access log, or passed on in a `Referer` header. The login page reads it, stores it
   the same way a password login does, and clears the fragment.
@@ -119,6 +126,8 @@ The things worth knowing:
   holds, rather than being nullable and making every password path test for it. The consequence is that its
   owner cannot use `/account`, which asks for a current password. A "set a password" flow is the upgrade;
   it is marked in `AccountService` and is not built.
+- **Every call to a provider is bounded** at 10 seconds to connect and 10 to answer, so a provider that
+  hangs costs one failed sign-in and not a request thread for good.
 - **A disabled provider answers 404**, the same as an unknown one. Which providers a deployment configured
   is nobody else's business.
 
@@ -228,20 +237,21 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 
 | Method | Path | Body / notes |
 |---|---|---|
-| POST | `/api/accounts` | `{name, email, password}` -> 201 `{id, name, email, role}`, always `USER` |
-| POST | `/api/login` | `{email, password}` -> `{token, name, email}`, 401, or 429 once locked out |
+| POST | `/api/accounts` | `{name, email, password}` -> 201 `{id, name, email, role}`, always `USER`; 429 past the cap |
+| POST | `/api/login` | `{email, password}` -> `{token, name, email, role}`, 401, or 429 once locked out |
 | GET | `/api/accounts/me` | the caller's own account |
 | PUT | `/api/accounts/me` | `{name, email, currentPassword, newPassword?}` |
 | GET | `/api/accounts` | everyone -- admin and moderator only, else 403 |
 | PUT | `/api/accounts/{id}/role` | `{role}` -- admin only, else 403 |
 | GET | `/api/oauth/providers` | `[{key, label}]` -- the configured providers, no token |
 | GET | `/api/oauth/{provider}/start` | 302 to consent, or 404 if that provider is off -- no token |
-| GET | `/api/oauth/{provider}/callback` | 302 to `/login#token=...` or `/login#error=...` -- no token |
+| GET | `/api/oauth/{provider}/callback` | 302 to `/login#token=...&name=...&role=...` or `/login#error=...` -- no token |
 | GET | `/api/public/stats` | `{accounts}` -- no token |
 | GET | `/api/jwks.json` | the public signing key -- no token |
 
 Everything except the bottom five needs `Authorization: Bearer <token>`. Every rejection comes back as
-`{"error": "..."}`, which `AuthExceptionAdvice` is responsible for.
+`{"error": "..."}`, Spring's own included -- a body that will not parse, an unknown role, a non-numeric id, an
+unknown path -- which `AuthExceptionAdvice` is responsible for.
 
 ## Configuration
 

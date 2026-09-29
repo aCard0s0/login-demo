@@ -18,9 +18,10 @@ import org.springframework.web.server.ResponseStatusException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * The two redirects a browser walks through to log in with a provider, plus the list the login page reads
@@ -45,8 +46,17 @@ public class OAuthController {
      */
     private static final String STATE_COOKIE = "oauth_state";
 
+    /**
+     * PKCE. The verifier is planted next to the state and only ever leaves this service in the back-channel
+     * token request; the provider is shown its hash on the way out. A code lifted from the redirect is then
+     * worthless to anyone who does not also hold this cookie -- which is nobody but the browser that started.
+     */
+    private static final String VERIFIER_COOKIE = "oauth_verifier";
+
     /** Long enough to read a consent screen, short enough that an abandoned attempt does not linger. */
     private static final Duration STATE_TTL = Duration.ofMinutes(10);
+
+    private final SecureRandom random = new SecureRandom();
 
     private final OAuthService oauth;
 
@@ -75,10 +85,12 @@ public class OAuthController {
     @GetMapping("/{provider}/start")
     public ResponseEntity<Void> start(@PathVariable String provider) {
         OAuthProvider target = enabled(provider);
-        String state = UUID.randomUUID().toString();
+        String state = secret();
+        String verifier = secret();
         return ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, oauth.consentUri(target, state))
-                .header(HttpHeaders.SET_COOKIE, stateCookie(state, STATE_TTL).toString())
+                .header(HttpHeaders.LOCATION, oauth.consentUri(target, state, verifier))
+                .header(HttpHeaders.SET_COOKIE, cookie(STATE_COOKIE, state, STATE_TTL).toString())
+                .header(HttpHeaders.SET_COOKIE, cookie(VERIFIER_COOKIE, verifier, STATE_TTL).toString())
                 .build();
     }
 
@@ -92,25 +104,27 @@ public class OAuthController {
                                          @RequestParam(required = false) String code,
                                          @RequestParam(required = false) String state,
                                          @RequestParam(required = false) String error,
-                                         @CookieValue(name = STATE_COOKIE, required = false) String expectedState) {
+                                         @CookieValue(name = STATE_COOKIE, required = false) String expectedState,
+                                         @CookieValue(name = VERIFIER_COOKIE, required = false) String verifier) {
         OAuthProvider target = enabled(provider);
-        // Whatever happens next, this attempt's state is spent.
+        // Whatever happens next, this attempt's state and verifier are spent.
         ResponseEntity.BodyBuilder done = ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.SET_COOKIE, stateCookie("", Duration.ZERO).toString());
+                .header(HttpHeaders.SET_COOKIE, cookie(STATE_COOKIE, "", Duration.ZERO).toString())
+                .header(HttpHeaders.SET_COOKIE, cookie(VERIFIER_COOKIE, "", Duration.ZERO).toString());
 
         if (error != null && !error.isBlank()) {
             return done.header(HttpHeaders.LOCATION, landing("error", "sign-in with " + label(target) + " was cancelled")).build();
         }
-        if (!matches(expectedState, state)) {
+        if (!matches(expectedState, state) || verifier == null || verifier.isBlank()) {
             return done.header(HttpHeaders.LOCATION, landing("error", "that sign-in did not start here, try again")).build();
         }
         if (code == null || code.isBlank()) {
             return done.header(HttpHeaders.LOCATION, landing("error", label(target) + " sent no authorization code")).build();
         }
         try {
-            Account account = oauth.login(target, code);
-            return done.header(HttpHeaders.LOCATION,
-                    landing("token", oauth.issue(account)) + "&name=" + encode(account.getName())).build();
+            Account account = oauth.login(target, code, verifier);
+            return done.header(HttpHeaders.LOCATION, landing("token", oauth.issue(account))
+                    + "&name=" + encode(account.getName()) + "&role=" + account.getRole().name()).build();
         } catch (Exception e) {
             // The provider's own wording can name internals, so the browser gets a flat message and the
             // detail goes to the container log.
@@ -134,8 +148,15 @@ public class OAuthController {
         return config.getRedirectBaseUrl().replaceAll("/+$", "") + "/login#" + key + "=" + encode(value);
     }
 
-    private ResponseCookie stateCookie(String value, Duration maxAge) {
-        return ResponseCookie.from(STATE_COOKIE, value)
+    /** 32 random bytes as base64url: 43 characters, which is exactly PKCE's minimum for a verifier. */
+    private String secret() {
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private ResponseCookie cookie(String name, String value, Duration maxAge) {
+        return ResponseCookie.from(name, value)
                 .httpOnly(true)
                 .secure(config.getRedirectBaseUrl().startsWith("https://"))
                 .sameSite("Lax")

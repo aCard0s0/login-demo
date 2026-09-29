@@ -7,6 +7,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -50,6 +51,7 @@ class ApiContractTests {
                         .content(json(null, email, password)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isString())
+                .andExpect(jsonPath("$.role").isString())
                 .andReturn().getResponse().getContentAsString();
         return body.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1");
     }
@@ -131,6 +133,24 @@ class ApiContractTests {
                         .content(json("Short", "short@example.com", "tiny")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").isString());
+
+        // Rejections MVC itself makes -- a body that will not parse, an id that is not a number, a path that
+        // does not exist -- must come back in the same shape, not as Spring's ProblemDetail.
+        mvc.perform(post("/api/accounts").contentType(MediaType.APPLICATION_JSON).content("{not json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").isString());
+        mvc.perform(put("/api/accounts/not-a-number/role").header("Authorization", "Bearer x")
+                        .contentType(MediaType.APPLICATION_JSON).content(role("ADMIN")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").isString());
+        mvc.perform(get("/api/nowhere"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").isString());
+        // The admin page shows this text, so an unknown role has to say what the known ones are.
+        mvc.perform(put("/api/accounts/1/role").header("Authorization", "Bearer x")
+                        .contentType(MediaType.APPLICATION_JSON).content(role("KING")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error", containsString("MODERATOR")));
     }
 
     @Test

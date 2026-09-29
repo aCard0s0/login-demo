@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -81,6 +82,14 @@ class OAuthTests {
         String state = response.getCookie("oauth_state").getValue();
         assertTrue(consent.contains("state=" + state), "the planted state must be the one echoed to the provider");
         assertTrue(consent.contains("response_type=code"), "the secret must stay in the back channel: " + consent);
+
+        // PKCE: the provider is shown the hash and the browser keeps the verifier, which never appears in a URL.
+        String verifier = response.getCookie("oauth_verifier").getValue();
+        assertTrue(verifier.length() >= 43, "a verifier must be at least 43 characters: " + verifier);
+        assertTrue(response.getCookie("oauth_verifier").isHttpOnly());
+        assertTrue(consent.contains("code_challenge_method=S256"), consent);
+        assertTrue(consent.contains("code_challenge="), consent);
+        assertFalse(consent.contains(verifier), "the verifier itself must stay in the cookie: " + consent);
     }
 
     @Test
@@ -93,6 +102,12 @@ class OAuthTests {
         // A cookie that disagrees with the query is the same refusal.
         mvc.perform(get("/api/oauth/google/callback").param("code", "stolen").param("state", "guessed")
                         .cookie(new Cookie("oauth_state", "something-else")))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", startsWith("http://localhost:3000/login#error=")));
+
+        // A matching state but no verifier cannot finish the exchange either, so it never reaches the provider.
+        mvc.perform(get("/api/oauth/google/callback").param("code", "stolen").param("state", "guessed")
+                        .cookie(new Cookie("oauth_state", "guessed")))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", startsWith("http://localhost:3000/login#error=")));
     }

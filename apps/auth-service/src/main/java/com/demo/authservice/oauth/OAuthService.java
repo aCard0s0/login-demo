@@ -4,13 +4,19 @@ import com.demo.authservice.account.Account;
 import com.demo.authservice.account.AccountService;
 import com.demo.authservice.token.Tokens;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.util.Base64;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +38,10 @@ import java.util.Map;
 @Service
 public class OAuthService {
 
-    private final RestClient http = RestClient.create();
+    /** Bounded, so a provider that stops answering costs one login attempt and not a request thread for good. */
+    private static final Duration TIMEOUT = Duration.ofSeconds(10);
+
+    private final RestClient http = RestClient.builder().requestFactory(requestFactory()).build();
 
     private final OAuthProperties config;
 
@@ -58,14 +67,19 @@ public class OAuthService {
         return config.of(provider).usable();
     }
 
-    /** Where to send the browser for consent. The state is echoed back to us and checked at the callback. */
-    public String consentUri(OAuthProvider provider, String state) {
+    /**
+     * Where to send the browser for consent. The state is echoed back to us and checked at the callback; the
+     * verifier's hash goes out here so the provider can demand the verifier itself at the token exchange.
+     */
+    public String consentUri(OAuthProvider provider, String state, String verifier) {
         return provider.authorizeUri()
                 + "?response_type=code"
                 + "&client_id=" + encode(config.of(provider).getClientId())
                 + "&redirect_uri=" + encode(config.redirectUri(provider))
                 + "&scope=" + encode(provider.scope())
-                + "&state=" + encode(state);
+                + "&state=" + encode(state)
+                + "&code_challenge=" + challenge(verifier)
+                + "&code_challenge_method=S256";
     }
 
     /**
@@ -73,8 +87,8 @@ public class OAuthService {
      * belongs to, and one of our JWTs for it. Returns the token and the account's name, which is all the
      * callback redirect carries.
      */
-    public Account login(OAuthProvider provider, String code) {
-        Identity identity = identityOf(provider, accessToken(provider, code));
+    public Account login(OAuthProvider provider, String code, String verifier) {
+        Identity identity = identityOf(provider, accessToken(provider, code, verifier));
         return accounts.findOrCreateFromOAuth(identity.email(), identity.name());
     }
 
@@ -86,10 +100,11 @@ public class OAuthService {
      * Trades the one-time code for an access token. The client secret travels in this back-channel POST and
      * never through the browser, which is the whole point of the code flow over the old implicit one.
      */
-    private String accessToken(OAuthProvider provider, String code) {
+    private String accessToken(OAuthProvider provider, String code, String verifier) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
         form.add("code", code);
+        form.add("code_verifier", verifier);
         form.add("client_id", config.of(provider).getClientId());
         form.add("client_secret", config.of(provider).getClientSecret());
         form.add("redirect_uri", config.redirectUri(provider));
@@ -152,6 +167,23 @@ public class OAuthService {
     private static String string(Map<?, ?> body, String key) {
         Object value = body == null ? null : body.get(key);
         return value == null ? "" : String.valueOf(value);
+    }
+
+    /** base64url(sha256(verifier)), the S256 method. Already URL-safe, so it goes into the query as is. */
+    private static String challenge(String verifier) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is mandatory in every JDK", e);
+        }
+    }
+
+    private static JdkClientHttpRequestFactory requestFactory() {
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
+                HttpClient.newBuilder().connectTimeout(TIMEOUT).build());
+        factory.setReadTimeout(TIMEOUT);
+        return factory;
     }
 
     private static String encode(String value) {

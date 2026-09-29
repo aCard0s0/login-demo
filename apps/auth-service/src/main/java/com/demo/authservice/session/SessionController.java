@@ -1,11 +1,11 @@
 package com.demo.authservice.session;
 
-import org.springframework.http.ResponseEntity;
+import com.demo.authservice.account.Account;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 public class SessionController {
@@ -17,10 +17,10 @@ public class SessionController {
     }
 
     @PostMapping("/api/login")
-    public ResponseEntity<?> login(@RequestBody LoginRequest req) {
-        return sessions.login(req.email(), req.password())
-                .<ResponseEntity<?>>map(s -> ResponseEntity.ok(
-                        new LoginResponse(s.token(), s.account().getName(), s.account().getEmail())))
-                .orElseGet(() -> ResponseEntity.status(401).body(Map.of("error", "invalid credentials")));
+    public LoginResponse login(@RequestBody LoginRequest req) {
+        Session session = sessions.login(req.email(), req.password())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid credentials"));
+        Account account = session.account();
+        return new LoginResponse(session.token(), account.getName(), account.getEmail(), account.getRole());
     }
 }

@@ -88,6 +88,10 @@ class AccountServiceTests {
         assertThrows(IllegalArgumentException.class, () -> auth.register("X", "y@example.com", "x".repeat(73)),
                 "BCrypt reads 72 bytes, so a longer password would be accepted truncated");
         assertThrows(IllegalArgumentException.class, () -> auth.register("Alan again", "alan@example.com", "long-enough"));
+        assertThrows(IllegalArgumentException.class, () -> auth.register("N".repeat(256), "n@example.com", "long-enough"),
+                "the column is varchar(255), so a longer name must be refused here and not by the database");
+        assertThrows(IllegalArgumentException.class,
+                () -> auth.register("Long", "l".repeat(250) + "@example.com", "long-enough"));
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.demo.authservice.account;
 
+import com.demo.authservice.support.AttemptWindow;
+import com.demo.authservice.support.TooManyAttemptsException;
 import com.demo.authservice.token.Tokens;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -7,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,6 +27,15 @@ public class AccountService {
      */
     private static final int MAX_PASSWORD_BYTES = 72;
 
+    /** The width Hibernate gives a String column. Checked here so Postgres does not answer with a misleading 400. */
+    private static final int MAX_COLUMN_LENGTH = 255;
+
+    // ponytail: one service-wide cap, not per client. Every request arrives from the Node proxy under one
+    // address and the proxy does not set X-Forwarded-For, so per-address would be this anyway; a run of bots
+    // fills the window and honest registrations wait it out with them. Per client needs the proxy to set the
+    // header and this side to trust it.
+    private final AttemptWindow registrations = new AttemptWindow(30, Duration.ofMinutes(15));
+
     private final PasswordEncoder encoder = new BCryptPasswordEncoder();
 
     private final AccountRepository accounts;
@@ -37,6 +49,12 @@ public class AccountService {
 
     @Transactional
     public Account register(String name, String email, String password) {
+        if (registrations.exceeded("")) {
+            throw new TooManyAttemptsException("too many registrations right now, try again in "
+                    + registrations.window().toMinutes() + " minutes");
+        }
+        // Counted before the checks, so a rejected body costs an attempt the same as an accepted one.
+        registrations.record("");
         String cleanName = cleanName(name);
         String cleanEmail = cleanEmail(email);
         checkPassword(password);
@@ -166,12 +184,15 @@ public class AccountService {
         if (clean.isEmpty()) {
             throw new IllegalArgumentException("name is required");
         }
+        if (clean.length() > MAX_COLUMN_LENGTH) {
+            throw new IllegalArgumentException("name must be at most " + MAX_COLUMN_LENGTH + " characters");
+        }
         return clean;
     }
 
     private static String cleanEmail(String email) {
         String clean = email == null ? "" : email.strip().toLowerCase();
-        if (!clean.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) {
+        if (clean.length() > MAX_COLUMN_LENGTH || !clean.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) {
             throw new IllegalArgumentException("a valid email is required");
         }
         return clean;
