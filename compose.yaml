@@ -38,6 +38,16 @@ services:
       # refuses to start the stack without them, rather than quietly coming up with nobody in charge.
       ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env — copy .env.example}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env — copy .env.example}
+      # Sign-in with Google and GitHub, off unless .env fills a provider in. Defaulted rather than
+      # required: a provider with no credentials is simply not offered, so .env need not mention these.
+      # The redirect base is the address the browser uses, which is web's published port, not this service.
+      OAUTH_REDIRECT_BASE_URL: ${OAUTH_REDIRECT_BASE_URL:-http://localhost:3000}
+      OAUTH_GOOGLE_ENABLED: ${OAUTH_GOOGLE_ENABLED:-false}
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
+      OAUTH_GITHUB_ENABLED: ${OAUTH_GITHUB_ENABLED:-false}
+      OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID:-}
+      OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET:-}
     depends_on:
       db:
         condition: service_healthy

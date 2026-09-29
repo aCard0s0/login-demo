@@ -10,8 +10,8 @@ pom.xml                 parent (packaging: pom)
 compose.yaml            db + the three services
 Dockerfile              one file, one build, three runtime stages
 docker/initdb.sql       one database and one role per service
-.env.example            the admin credentials compose expects in .env
-apps/auth-service       accounts, login, roles, token issuing   :9081
+.env.example            the admin credentials and OAuth client secrets compose reads from .env
+apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
 apps/todo-service       per-account todos                       :9082
 apps/web                static pages + /api proxy               :3000
 ```
@@ -20,7 +20,7 @@ Each service documents itself:
 
 | | What it owns | README |
 |---|---|---|
-| auth-service | accounts, passwords, roles, the signing key | [apps/auth-service](apps/auth-service/README.md) |
+| auth-service | accounts, passwords, roles, OAuth sign-in, the signing key | [apps/auth-service](apps/auth-service/README.md) |
 | todo-service | todos, and verifying tokens locally | [apps/todo-service](apps/todo-service/README.md) |
 | web | the four pages and the one-origin proxy | [apps/web](apps/web/README.md) |
 
@@ -166,6 +166,29 @@ exactly as it is, so a restart cannot quietly reset a password the admin has sin
 Details, including why it is not in `docker/initdb.sql`, are in the
 [auth-service README](apps/auth-service/README.md#the-seeded-admin).
 
+## Signing in with Google or GitHub
+
+Off by default, and on per provider: set `OAUTH_<PROVIDER>_ENABLED=true` together with that provider's
+client id and secret in `.env`. Either credential missing counts as off, so a half-filled `.env` draws no
+button rather than a button that leads to a provider error page. `.env.example` lists the settings, and
+[getting a client id and secret](apps/auth-service/README.md#getting-a-client-id-and-secret) walks through
+both consoles.
+
+Register `http://localhost:3000/api/oauth/<provider>/callback` as the callback URL with the provider,
+exactly as written. Serving the frontend from another address means changing `OAUTH_REDIRECT_BASE_URL` and
+the registered URI together -- a provider rejects a `redirect_uri` it does not already know.
+
+**Signing up and logging in are the same button.** A provider identity is matched to an account by
+*verified* email: if that address is already registered it is that account, password login and all;
+otherwise an account is created for it. An unverified address is refused, since accepting one would let
+anyone who can claim an address at a provider walk into the account that already owns it here.
+
+The flow is the OAuth 2.0 authorization-code flow written out by hand rather than
+`spring-boot-starter-oauth2-client`, which would install the security filter chain these services
+deliberately do not have. The state-cookie guard, the fragment handoff, and why an account created this way
+has no usable password are in the
+[auth-service README](apps/auth-service/README.md#signing-in-with-google-or-github).
+
 ## How the services trust each other
 
 auth-service generates an RSA keypair at startup and signs RS256 JWTs with the private half. It publishes
@@ -191,6 +214,8 @@ The consequences worth knowing:
 | auth | GET · PUT | `/api/accounts/me` | yes |
 | auth | GET | `/api/accounts` | yes -- admin and moderator only |
 | auth | PUT | `/api/accounts/{id}/role` | yes -- admin only |
+| auth | GET | `/api/oauth/providers` | no |
+| auth | GET | `/api/oauth/{provider}/start` · `/callback` | no -- 302s the browser walks through |
 | auth | GET | `/api/public/stats` | no |
 | auth | GET | `/api/jwks.json` | no |
 | todo | GET · POST | `/api/todos` | yes |

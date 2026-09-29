@@ -29,6 +29,13 @@ li.done span { text-decoration: line-through; opacity: .5; }
 .stats b { display: block; font-size: 2rem; font-weight: 600; line-height: 1.1; }
 .stats small { opacity: .7; }
 
+.divider { display: flex; align-items: center; gap: .75rem; opacity: .5; font-size: .9rem; margin: 1.5rem 0; }
+.divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid #8883; }
+.providers { display: flex; flex-wrap: wrap; gap: .5rem; }
+.provider { flex: 1 1 12rem; text-align: center; padding: .5rem .6rem; border: 1px solid #8886;
+            border-radius: .4rem; text-decoration: none; color: inherit; }
+.provider:hover { border-color: currentColor; }
+
 .error { color: #c00; min-height: 1.5rem; }
 .ok { color: #070; min-height: 1.5rem; }
 .note { opacity: .7; font-size: .9rem; }

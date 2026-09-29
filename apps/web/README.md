@@ -11,7 +11,7 @@ minified, so what is in `public/` is what the browser gets.
 | URL | What |
 |---|---|
 | `/` | Landing. The two public counts, no token needed. |
-| `/login` | Log in, or create an account and drop straight in. |
+| `/login` | Log in, create an account, or continue with a configured provider. |
 | `/todos` | Your todos. Bounces to `/login` without a token. |
 | `/account` | Change your name, email or password. |
 
@@ -30,11 +30,24 @@ the `Authorization` header to every call, renders the one header, and turns a `{
 thrown `Error` the pages display. A 401 while holding a token clears the session and bounces to
 `/login?expired`; a 401 without one is just a failed login.
 
+## Signing in with a provider
+
+`/login` asks auth-service for `GET /api/oauth/providers` and draws one button per provider the deployment
+configured -- none configured, no section. The button is a plain link to
+`/api/oauth/<provider>/start`, because the browser itself has to travel through the redirects; a `fetch`
+could not follow them to another origin.
+
+The browser comes back to `/login#token=...&name=...`, and the page stores that the same way a password
+login does. A **fragment** rather than a query string, so the token never reaches this server, its access
+log, or a `Referer` header. The fragment is cleared with `history.replaceState` either way, so a refresh
+cannot replay a spent sign-in; a failure arrives as `#error=...` and renders in the same place a wrong
+password does.
+
 ## The proxy
 
 `/api/todos*` and `/api/public/todos*` go to todo-service, and the rest of `/api/*` to auth-service. Method,
-path, headers and body are passed through untouched, so PATCH and the `Authorization` header need nothing
-special.
+path, headers and body are passed through untouched, so PATCH, the `Authorization` header, the OAuth state
+cookie and the 302s of the provider flow all need nothing special.
 
 The point is that the browser stays on one origin: neither service needs CORS configuration, and neither has
 to publish a port. An upstream that is down answers 502 rather than hanging.

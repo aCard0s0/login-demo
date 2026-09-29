@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /** The account itself: who exists, what their details are, and which account a caller's token names. */
 @Service
@@ -72,6 +73,28 @@ public class AccountService {
     }
 
     /**
+     * The account behind a provider identity: the one already registered with that email, or a new one.
+     *
+     * <p>Matching on the email is what makes signing in with Google and signing in with a password the same
+     * account rather than two. The caller is responsible for having checked that the provider verified the
+     * address -- this method cannot tell, and an unverified one would be a way to walk into somebody else's
+     * account.
+     */
+    // ponytail: no provider/provider-id columns, so an account created this way has no password it can be
+    // asked for, and /account's "current password" gate locks its owner out of editing. A "set a password"
+    // flow is the upgrade; linking by verified email is the whole requirement today.
+    @Transactional
+    public Account findOrCreateFromOAuth(String email, String name) {
+        String cleanEmail = cleanEmail(email);
+        return accounts.findByEmail(cleanEmail).orElseGet(() -> {
+            // A hash of a value nobody holds, rather than a nullable column every password path would then
+            // have to test for. No password can match it, so the only way in stays the provider.
+            String unusable = encoder.encode(UUID.randomUUID().toString());
+            return accounts.save(new Account(cleanName(nameOr(name, cleanEmail)), cleanEmail, unusable));
+        });
+    }
+
+    /**
      * Resolves a token to the account it names, or empty if it does not check out. The account is re-read rather
      * than taken from the token's claims, so a rename shows up straight away instead of at the next login.
      */
@@ -131,6 +154,11 @@ public class AccountService {
         Account admin = new Account("Admin", cleanEmail, encoder.encode(password));
         admin.setRole(Role.ADMIN);
         return accounts.save(admin);
+    }
+
+    /** Providers do not all have a name to give; the address's local part is a better fallback than a refusal. */
+    private static String nameOr(String name, String email) {
+        return name == null || name.isBlank() ? email.substring(0, email.indexOf('@')) : name;
     }
 
     private static String cleanName(String name) {

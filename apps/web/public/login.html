@@ -34,6 +34,11 @@
       <p><small>Already registered? <button class="link" id="to-login">Log in</button></small></p>
     </section>
 
+    <section id="oauth" hidden>
+      <p class="divider"><span>or</span></p>
+      <div class="providers" id="providers"></div>
+    </section>
+
     <p class="note">
       Five wrong passwords for one email locks it for 15 minutes, correct password included.
     </p>
@@ -42,9 +47,20 @@
 <script type="module">
 import { $, api, setSession, token } from '/app.js';
 
+// A provider sends the browser back to /login with the result in the fragment rather than the query, so
+// the token never reaches a server log or a Referer header. Read it before anything else can redirect.
+const handoff = new URLSearchParams(location.hash.slice(1));
+if (handoff.has('token')) {
+  setSession(handoff.get('token'), handoff.get('name') ?? '');
+  location.href = '/todos';
+}
+// Drop the fragment either way, so a refresh does not replay a spent sign-in.
+if (location.hash) history.replaceState(null, '', '/login');
+
 if (token()) location.href = '/todos';
 
 if (location.search.includes('expired')) $('login-error').textContent = 'Your session expired, log in again.';
+if (handoff.has('error')) $('login-error').textContent = handoff.get('error');
 
 const show = (registering) => {
   $('login-view').hidden = registering;
@@ -81,6 +97,16 @@ $('register-form').onsubmit = async (e) => {
     $('register-error').textContent = err.message;
   }
 };
+
+const providers = await api('/api/oauth/providers').catch(() => []);
+if (providers.length) {
+  $('providers').append(...providers.map(({ key, label }) => Object.assign(document.createElement('a'), {
+    href: `/api/oauth/${key}/start`,
+    textContent: `Continue with ${label}`,
+    className: 'provider',
+  })));
+  $('oauth').hidden = false;
+}
 
 $('to-register').onclick = () => { $('login-error').textContent = ''; show(true); };
 $('to-login').onclick = () => { $('register-error').textContent = ''; show(false); };
