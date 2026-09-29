@@ -77,10 +77,12 @@ const signIn = async (email, password) => {
 $('login-form').onsubmit = async (e) => {
   e.preventDefault();
   $('login-error').textContent = '';
+  e.submitter.disabled = true; // a double click would spend two of the five strikes
   try {
     await signIn($('login-email').value, $('login-password').value);
   } catch (err) {
     $('login-error').textContent = err.message;
+    e.submitter.disabled = false;
   }
 };
 

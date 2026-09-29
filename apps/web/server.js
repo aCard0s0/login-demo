@@ -27,7 +27,11 @@ const proxy = (req, res, target) => {
       up.pipe(res);
     },
   );
-  upstream.on('error', () => res.writeHead(502).end('upstream unavailable'));
+  upstream.on('error', () => {
+    // Headers already streamed means the upstream died mid-response; cutting the socket is all that is left.
+    if (res.headersSent) return res.destroy();
+    res.writeHead(502, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'upstream unavailable' }));
+  });
   req.pipe(upstream);
 };
 

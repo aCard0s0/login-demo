@@ -73,14 +73,15 @@ if (requireLogin()) {
     }));
   };
 
+  // Re-render even after a failure, so a checkbox or a rename input never shows a state the server refused.
   const run = async (action) => {
     $('error').textContent = '';
     try {
       await action();
-      await render();
     } catch (err) {
       $('error').textContent = err.message;
     }
+    await render().catch((err) => { $('error').textContent = err.message; });
   };
 
   $('todo-form').onsubmit = (e) => {

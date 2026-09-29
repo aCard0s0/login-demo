@@ -37,7 +37,7 @@
   </main>
 
 <script type="module">
-import { $, api, requireLogin, renderNav } from '/app.js';
+import { $, api, requireLogin, renderNav, setSession, token } from '/app.js';
 
 if (requireLogin()) {
   const load = async () => {
@@ -61,7 +61,7 @@ if (requireLogin()) {
         }),
       });
       // The token still says the old name, so keep the header honest from the response instead.
-      sessionStorage.setItem('name', updated.name);
+      setSession(token(), updated.name);
       renderNav();
       $('current-password').value = '';
       $('new-password').value = '';

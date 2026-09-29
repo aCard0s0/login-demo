@@ -71,3 +71,13 @@ controls on any page. See the [root README](../../README.md#roles) for what the 
 ```bash
 node apps/web/server.js     # with both services already up
 ```
+
+## Tests
+
+`auth.test.js` covers the authentication paths only: the proxy leg to auth-service (method, body,
+`Authorization` header and the provider 302 pass through; a dead upstream answers a JSON 502) and the
+401 rules in `app.js`. Plain `node --test`, no dependencies.
+
+```bash
+npm test --prefix apps/web
+```

@@ -28,9 +28,11 @@ export const api = async (path, options = {}) => {
     throw new Error('session expired');
   }
   // Handlers returning void (DELETE) send 200 with an empty body, so parse only when there is one.
+  // A body that is not JSON (a whitelabel error page) is still an error, not a SyntaxError for the user.
   const text = await res.text();
-  const body = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new Error(body?.error || res.statusText);
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch { if (res.ok) throw new Error('unexpected response'); }
+  if (!res.ok) throw new Error(body?.error || res.statusText || `HTTP ${res.status}`);
   return body;
 };
 

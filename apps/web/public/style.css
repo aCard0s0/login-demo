@@ -36,8 +36,8 @@ li.done span { text-decoration: line-through; opacity: .5; }
             border-radius: .4rem; text-decoration: none; color: inherit; }
 .provider:hover { border-color: currentColor; }
 
-.error { color: #c00; min-height: 1.5rem; }
-.ok { color: #070; min-height: 1.5rem; }
+.error { color: light-dark(#c00, #f77); min-height: 1.5rem; }
+.ok { color: light-dark(#070, #7d7); min-height: 1.5rem; }
 .note { opacity: .7; font-size: .9rem; }
 .link { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; }
 [hidden] { display: none !important; }
