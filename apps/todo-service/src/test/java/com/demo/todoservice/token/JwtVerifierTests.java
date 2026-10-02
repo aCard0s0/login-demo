@@ -18,6 +18,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -35,9 +36,12 @@ class JwtVerifierTests {
         RSAKey advertised = new RSAKeyGenerator(2048).keyID("advertised").generate();
         RSAKey impostor = new RSAKeyGenerator(2048).keyID("impostor").generate();
 
-        HttpServer jwks = publish(new JWKSet(advertised.toPublicJWK()).toString());
+        HttpServer jwks = publish(Map.of(
+                "/jwks.json", new JWKSet(advertised.toPublicJWK()).toString(),
+                "/token-versions", "{\"7\":2}"));
         try {
-            JwtVerifier verifier = new JwtVerifier("http://localhost:" + jwks.getAddress().getPort() + "/jwks.json");
+            String base = "http://localhost:" + jwks.getAddress().getPort();
+            JwtVerifier verifier = new JwtVerifier(base + "/jwks.json", new Revocations(base + "/token-versions"));
             Instant later = Instant.now().plusSeconds(300);
 
             Caller caller = verifier.callerOf("Bearer " + token(advertised, "42", later, "MODERATOR"));
@@ -57,6 +61,14 @@ class JwtVerifierTests {
             assertThrows(ResponseStatusException.class,
                     () -> verifier.callerOf("Bearer " + token(advertised, "42", Instant.now().minusSeconds(300), "USER")),
                     "an expired token must not be accepted");
+            // Account 7 was revoked up to version 2: older tokens die, that one and anything newer live.
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 1)),
+                    "a token from before the account's last revocation must not be accepted");
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "7", later, "USER")),
+                    "a token with no version is version zero");
+            assertEquals("7", verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 2)).accountId());
+            assertEquals("7", verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 3)).accountId(),
+                    "a token newer than the last revocation heard of is fine");
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf(null));
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer not.a.token"));
         } finally {
@@ -65,9 +77,16 @@ class JwtVerifierTests {
     }
 
     private static String token(RSAKey key, String subject, Instant expiry, String role) throws Exception {
+        return token(key, subject, expiry, role, null);
+    }
+
+    private static String token(RSAKey key, String subject, Instant expiry, String role, Integer version) throws Exception {
         JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder().subject(subject).expirationTime(Date.from(expiry));
         if (role != null) {
             claims.claim("role", role);
+        }
+        if (version != null) {
+            claims.claim("ver", version);
         }
         SignedJWT jwt = new SignedJWT(
                 new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(), claims.build());
@@ -75,17 +94,17 @@ class JwtVerifierTests {
         return jwt.serialize();
     }
 
-    /** A one-endpoint JWKS server on a free port, standing in for auth-service. */
-    private static HttpServer publish(String jwks) throws IOException {
+    /** A JSON server on a free port, standing in for auth-service: path to body. */
+    private static HttpServer publish(Map<String, String> bodies) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
-        server.createContext("/jwks.json", exchange -> {
-            byte[] body = jwks.getBytes(StandardCharsets.UTF_8);
+        bodies.forEach((path, json) -> server.createContext(path, exchange -> {
+            byte[] body = json.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream out = exchange.getResponseBody()) {
                 out.write(body);
             }
-        });
+        }));
         server.start();
         return server;
     }

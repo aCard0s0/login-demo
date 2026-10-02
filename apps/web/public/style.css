@@ -1,10 +1,11 @@
 :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-body { max-width: 38rem; margin: 0 auto; padding: 1rem; line-height: 1.5; }
+body { max-width: 60rem; margin: 0 auto; padding: 1rem; line-height: 1.5; }
 
-header { display: flex; align-items: baseline; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid #8883; }
+header { display: flex; align-items: center; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid #8883; }
 header .brand { font-weight: 600; text-decoration: none; color: inherit; margin-right: auto; }
-header nav { display: flex; align-items: baseline; gap: 1rem; }
+header nav { display: flex; align-items: center; gap: 1rem; }
 header nav a { color: inherit; }
+header nav a, header nav button { display: inline-flex; align-items: center; gap: .35rem; }
 header nav a[aria-current] { text-decoration: none; font-weight: 600; }
 header .who { opacity: .7; font-size: .9rem; }
 
@@ -29,6 +30,16 @@ li.done span { text-decoration: line-through; opacity: .5; }
 .stats b { display: block; font-size: 2rem; font-weight: 600; line-height: 1.1; }
 .stats small { opacity: .7; }
 
+table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+th, td { text-align: left; padding: .5rem .4rem; border-bottom: 1px solid #8883; vertical-align: middle; }
+th { font-weight: 600; font-size: .9rem; opacity: .7; }
+td small { display: block; opacity: .7; }
+td.actions { display: flex; gap: .4rem; justify-content: flex-end; flex-wrap: wrap; }
+.table-wrap { overflow-x: auto; }
+.badge { font-size: .8rem; padding: .1rem .5rem; border-radius: 1rem; border: 1px solid currentColor; white-space: nowrap; }
+.badge.suspended { color: light-dark(#c00, #f77); }
+.badge.active { color: light-dark(#070, #7d7); }
+
 .divider { display: flex; align-items: center; gap: .75rem; opacity: .5; font-size: .9rem; margin: 1.5rem 0; }
 .divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid #8883; }
 .providers { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -40,4 +51,7 @@ li.done span { text-decoration: line-through; opacity: .5; }
 .ok { color: light-dark(#070, #7d7); min-height: 1.5rem; }
 .note { opacity: .7; font-size: .9rem; }
 .link { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; }
+.icon { display: inline-flex; flex: none; }
+.icon svg { width: 1.1em; height: 1.1em; }
+form button, .provider { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
 [hidden] { display: none !important; }

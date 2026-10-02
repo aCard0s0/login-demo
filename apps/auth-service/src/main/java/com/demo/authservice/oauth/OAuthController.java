@@ -123,6 +123,9 @@ public class OAuthController {
         }
         try {
             Account account = oauth.login(target, code, verifier);
+            if (account.isSuspended()) {
+                return done.header(HttpHeaders.LOCATION, landing("error", "this account is suspended")).build();
+            }
             return done.header(HttpHeaders.LOCATION, landing("token", oauth.issue(account))
                     + "&name=" + encode(account.getName()) + "&role=" + account.getRole().name()).build();
         } catch (Exception e) {

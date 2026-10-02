@@ -218,4 +218,41 @@ class ApiContractTests {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").isString());
     }
+
+    @Test
+    void onlyAnAdminSuspendsOrRevokesAndASuspendedAccountCannotLogIn() throws Exception {
+        String admin = login("admin@example.com", "admin-pass-01");
+        String user = register("Hedy", "hedy@example.com", "lamarr-1914");
+        long hedyId = idOf(user);
+
+        mvc.perform(put("/api/accounts/" + hedyId + "/suspended").header("Authorization", "Bearer " + user)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"suspended\":true}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/accounts/" + hedyId + "/revoke").header("Authorization", "Bearer " + user))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(put("/api/accounts/" + hedyId + "/suspended").header("Authorization", "Bearer " + admin)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"suspended\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.suspended").value(true));
+        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + user))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(json(null, "hedy@example.com", "lamarr-1914")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("this account is suspended"));
+
+        mvc.perform(put("/api/accounts/" + hedyId + "/suspended").header("Authorization", "Bearer " + admin)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"suspended\":false}"))
+                .andExpect(jsonPath("$.suspended").value(false));
+        String again = login("hedy@example.com", "lamarr-1914");
+
+        mvc.perform(post("/api/accounts/" + hedyId + "/revoke").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + again))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/internal/token-versions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$['" + hedyId + "']").value(2));
+    }
 }

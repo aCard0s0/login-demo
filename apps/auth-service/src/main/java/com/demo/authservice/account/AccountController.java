@@ -62,11 +62,31 @@ public class AccountController {
     public AccountResponse setRole(@RequestHeader(value = "Authorization", required = false) String authorization,
                                    @PathVariable Long id,
                                    @RequestBody RoleChange req) {
+        return AccountResponse.of(accounts.changeRole(admin(authorization), id, req.role()));
+    }
+
+    /** Suspends or reactivates another account. Admin only. */
+    @PutMapping("/{id}/suspended")
+    public AccountResponse setSuspended(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                        @PathVariable Long id,
+                                        @RequestBody Suspension req) {
+        return AccountResponse.of(accounts.setSuspended(admin(authorization), id, req.suspended()));
+    }
+
+    /** Signs another account out everywhere by killing every token it holds. Admin only. */
+    @PostMapping("/{id}/revoke")
+    public AccountResponse revoke(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                  @PathVariable Long id) {
+        admin(authorization);
+        return AccountResponse.of(accounts.revokeTokens(id));
+    }
+
+    private Account admin(String authorization) {
         Account caller = caller(authorization);
         if (caller.getRole() != Role.ADMIN) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "only an admin can change a role");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "only an admin can do that");
         }
-        return AccountResponse.of(accounts.changeRole(caller, id, req.role()));
+        return caller;
     }
 
     /**

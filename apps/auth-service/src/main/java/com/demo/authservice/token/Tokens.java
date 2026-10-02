@@ -52,7 +52,7 @@ public class Tokens {
      * the account package and the arrow between them only ever points one way. The role rides along as a
      * plain string: it is what lets todo-service decide what a caller may touch without asking us.
      */
-    public String issue(Long accountId, String email, String name, String role) {
+    public String issue(Long accountId, String email, String name, String role, int version) {
         Instant now = Instant.now();
         SignedJWT jwt = new SignedJWT(
                 new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(),
@@ -61,6 +61,7 @@ public class Tokens {
                         .claim("email", email)
                         .claim("name", name)
                         .claim("role", role)
+                        .claim("ver", version)
                         .issueTime(Date.from(now))
                         .expirationTime(Date.from(now.plus(ttl)))
                         .build());
@@ -72,8 +73,11 @@ public class Tokens {
         return jwt.serialize();
     }
 
-    /** The account id a token names, or empty if the signature is wrong, the token is malformed, or it has expired. */
-    public Optional<Long> accountIdFrom(String token) {
+    /** What a verified token says about its account: which one, and which generation of its tokens. */
+    public record Claims(Long accountId, int version) {}
+
+    /** What a token names, or empty if the signature is wrong, the token is malformed, or it has expired. */
+    public Optional<Claims> claimsFrom(String token) {
         if (token == null || token.isBlank()) {
             return Optional.empty();
         }
@@ -86,7 +90,9 @@ public class Tokens {
             if (expiry == null || expiry.toInstant().isBefore(Instant.now())) {
                 return Optional.empty();
             }
-            return Optional.of(Long.valueOf(jwt.getJWTClaimsSet().getSubject()));
+            Long version = jwt.getJWTClaimsSet().getLongClaim("ver");
+            return Optional.of(new Claims(Long.valueOf(jwt.getJWTClaimsSet().getSubject()),
+                    version == null ? 0 : version.intValue()));
         } catch (Exception e) {
             return Optional.empty();
         }

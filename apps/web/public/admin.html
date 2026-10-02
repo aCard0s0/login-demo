@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin &middot; login-demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header></header>
+
+  <main>
+    <h1>Manage users</h1>
+    <p class="error" id="error"></p>
+    <p class="ok" id="done"></p>
+    <div class="table-wrap" id="list" hidden>
+      <table>
+        <thead><tr><th>Account</th><th>Role</th><th>Status</th><th></th></tr></thead>
+        <tbody id="accounts"></tbody>
+      </table>
+    </div>
+
+    <p class="note">
+      <b>Suspend</b> stops an account logging in and kills every token it holds, until it is reactivated.
+      <b>Revoke access</b> signs it out everywhere; it can log straight back in. Both bite at once in
+      auth-service and within ten seconds in todo-service, which checks tokens itself.
+    </p>
+  </main>
+
+<script type="module">
+import { $, api, claims, icon, requireLogin } from '/app.js';
+
+const button = (text, name, onclick) => {
+  const b = Object.assign(document.createElement('button'), { textContent: text, onclick });
+  b.prepend(icon(name));
+  return b;
+};
+
+const cell = (...children) => {
+  const td = document.createElement('td');
+  td.append(...children);
+  return td;
+};
+
+const render = async () => {
+  const me = String(claims().sub);
+  const accounts = await api('/api/accounts');
+  $('accounts').replaceChildren(...accounts.map((a) => {
+    const tr = document.createElement('tr');
+    // textContent throughout: names and emails are whatever each account owner typed.
+    const who = cell(a.name, Object.assign(document.createElement('small'), { textContent: a.email }));
+    const status = Object.assign(document.createElement('span'), {
+      className: `badge ${a.suspended ? 'suspended' : 'active'}`,
+      textContent: a.suspended ? 'Suspended' : 'Active',
+    });
+    const actions = cell();
+    actions.className = 'actions';
+    if (String(a.id) === me) {
+      actions.append(Object.assign(document.createElement('small'), { textContent: 'you' }));
+    } else {
+      actions.append(
+        a.suspended
+          ? button('Reactivate', 'reactivate', () => act(`Reactivate ${a.email}?`,
+              () => api(`/api/accounts/${a.id}/suspended`, { method: 'PUT', body: JSON.stringify({ suspended: false }) }),
+              `${a.email} reactivated.`))
+          : button('Suspend', 'suspend', () => act(`Suspend ${a.email}? They are signed out and cannot log in until reactivated.`,
+              () => api(`/api/accounts/${a.id}/suspended`, { method: 'PUT', body: JSON.stringify({ suspended: true }) }),
+              `${a.email} suspended.`)),
+        button('Revoke access', 'logout', () => act(`Sign ${a.email} out everywhere?`,
+          () => api(`/api/accounts/${a.id}/revoke`, { method: 'POST' }),
+          `${a.email} signed out everywhere.`)),
+      );
+    }
+    tr.append(who, cell(a.role), cell(status), actions);
+    return tr;
+  }));
+  $('list').hidden = false;
+};
+
+const act = async (question, action, success) => {
+  if (!confirm(question)) return;
+  $('error').textContent = '';
+  $('done').textContent = '';
+  try {
+    await action();
+    $('done').textContent = success;
+  } catch (err) {
+    $('error').textContent = err.message;
+  }
+  await render().catch((err) => { $('error').textContent = err.message; });
+};
+
+// The role check here only decides what to draw. Every action is refused server-side for anyone but an admin.
+if (requireLogin()) {
+  if (claims().role !== 'ADMIN') {
+    $('error').textContent = 'Only an admin can manage users.';
+  } else {
+    render().catch((err) => { $('error').textContent = err.message; });
+  }
+}
+</script>
+</body>
+</html>

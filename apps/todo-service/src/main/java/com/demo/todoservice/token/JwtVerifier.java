@@ -30,7 +30,10 @@ public class JwtVerifier {
 
     private final JWTProcessor<SecurityContext> jwt;
 
-    public JwtVerifier(@Value("${auth.jwks-uri}") String jwksUri) throws Exception {
+    private final Revocations revocations;
+
+    public JwtVerifier(@Value("${auth.jwks-uri}") String jwksUri, Revocations revocations) throws Exception {
+        this.revocations = revocations;
         JWKSource<SecurityContext> keys = JWKSourceBuilder.create(URI.create(jwksUri).toURL()).build();
         DefaultJWTProcessor<SecurityContext> processor = new DefaultJWTProcessor<>();
         processor.setJWSKeySelector(new JWSVerificationKeySelector<>(JWSAlgorithm.RS256, keys));
@@ -44,6 +47,12 @@ public class JwtVerifier {
         String token = authorization == null ? "" : authorization.replaceFirst("(?i)^Bearer ", "");
         try {
             JWTClaimsSet claims = jwt.process(token, null);
+            // A token older than the account's last revocation is dead, however good its signature.
+            // At least rather than equal: a token minted after a revocation we have not heard of yet is fine.
+            Long version = claims.getLongClaim("ver");
+            if ((version == null ? 0 : version) < revocations.minimumVersion(claims.getSubject())) {
+                throw new IllegalStateException("revoked");
+            }
             // A token with no role claim is read as a plain user: least privilege, rather than a 500.
             Object role = claims.getClaim("role");
             return new Caller(claims.getSubject(), role == null ? "USER" : String.valueOf(role));

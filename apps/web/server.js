@@ -11,6 +11,7 @@ const PAGES = {
   '/login': 'login.html',
   '/todos': 'todos.html',
   '/account': 'account.html',
+  '/admin': 'admin.html',
 };
 const ASSETS = {
   '/app.js': ['app.js', 'text/javascript'],
@@ -18,10 +19,10 @@ const ASSETS = {
 };
 
 // Proxying /api keeps the browser on one origin, so no CORS config in either service.
-const proxy = (req, res, target) => {
+const proxy = (req, res, target, path) => {
   const { hostname, port } = new URL(target);
   const upstream = request(
-    { hostname, port, path: req.url, method: req.method, headers: { ...req.headers, host: `${hostname}:${port}` } },
+    { hostname, port, path, method: req.method, headers: { ...req.headers, host: `${hostname}:${port}` } },
     (up) => {
       res.writeHead(up.statusCode, up.headers);
       up.pipe(res);
@@ -36,10 +37,12 @@ const proxy = (req, res, target) => {
 };
 
 createServer(async (req, res) => {
-  const path = req.url.split('?')[0];
+  // Routed and forwarded as the URL parser resolves it, dot segments (encoded ones too) already collapsed, so
+  // /api/../internal cannot ride through as /api and be resolved upstream to a path never meant to be public.
+  const { pathname: path, search } = new URL(req.url, 'http://web');
   // Both the private todos and the public todo count live in todo-service; everything else is auth-service.
-  if (path.startsWith('/api/todos') || path.startsWith('/api/public/todos')) return proxy(req, res, TODO);
-  if (path.startsWith('/api/')) return proxy(req, res, AUTH);
+  if (path.startsWith('/api/todos') || path.startsWith('/api/public/todos')) return proxy(req, res, TODO, path + search);
+  if (path.startsWith('/api/')) return proxy(req, res, AUTH, path + search);
 
   const [file, type] = ASSETS[path] ?? [PAGES[path], 'text/html'];
   if (!file) return res.writeHead(404).end('not found');

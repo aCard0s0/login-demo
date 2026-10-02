@@ -37,6 +37,7 @@ spans both services; what *this* service enforces is:
 | `PUT /api/accounts/me` | own | own | own | own |
 | `GET /api/accounts` | everyone | everyone | 403 | 403 |
 | `PUT /api/accounts/{id}/role` | any account | 403 | 403 | 403 |
+| `PUT /api/accounts/{id}/suspended` · `POST /api/accounts/{id}/revoke` | any account | 403 | 403 | 403 |
 
 Registration always produces a `USER`: `POST /api/accounts` has no role field to ask with, and
 `PUT /api/accounts/me` cannot change one. `PUT /api/accounts/{id}/role` is the single door off `USER`.
@@ -223,7 +224,7 @@ restart rather than an outage.
 ## Tokens
 
 An RSA keypair is generated at startup and never written to disk. Tokens are RS256 JWTs carrying `sub`
-(the account id), `email`, `name`, `role`, `iat` and `exp`. The public half is published at
+(the account id), `email`, `name`, `role`, `ver` (the account's token version), `iat` and `exp`. The public half is published at
 `/api/jwks.json` with a `kid`, so a second key can be added later without breaking anything.
 
 The id is the subject because it is the one thing about an account that never changes; a rename or a new
@@ -243,6 +244,9 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 | PUT | `/api/accounts/me` | `{name, email, currentPassword, newPassword?}` |
 | GET | `/api/accounts` | everyone -- admin and moderator only, else 403 |
 | PUT | `/api/accounts/{id}/role` | `{role}` -- admin only, else 403 |
+| PUT | `/api/accounts/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |
+| POST | `/api/accounts/{id}/revoke` | no body -- admin only; kills every token the account holds |
+| GET | `/internal/token-versions` | `{accountId: version}` for every revoked account; todo-service polls it |
 | GET | `/api/oauth/providers` | `[{key, label}]` -- the configured providers, no token |
 | GET | `/api/oauth/{provider}/start` | 302 to consent, or 404 if that provider is off -- no token |
 | GET | `/api/oauth/{provider}/callback` | 302 to `/login#token=...&name=...&role=...` or `/login#error=...` -- no token |

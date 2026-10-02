@@ -15,7 +15,7 @@
       <form id="login-form">
         <input id="login-email" type="email" placeholder="email" autocomplete="username" required>
         <input id="login-password" type="password" placeholder="password" autocomplete="current-password" required>
-        <button>Log in</button>
+        <button data-icon="login">Log in</button>
       </form>
       <p class="error" id="login-error"></p>
       <p><small>No account? <button class="link" id="to-register">Create one</button></small></p>
@@ -28,7 +28,7 @@
         <input id="register-email" type="email" placeholder="email" autocomplete="username" required>
         <input id="register-password" type="password" placeholder="password (8+ characters)"
                autocomplete="new-password" minlength="8" required>
-        <button>Create account</button>
+        <button data-icon="signup">Create account</button>
       </form>
       <p class="error" id="register-error"></p>
       <p><small>Already registered? <button class="link" id="to-login">Log in</button></small></p>
@@ -45,7 +45,9 @@
   </main>
 
 <script type="module">
-import { $, api, setSession, token } from '/app.js';
+import { $, api, icon, setSession, token } from '/app.js';
+
+for (const button of document.querySelectorAll('[data-icon]')) button.prepend(icon(button.dataset.icon));
 
 // A provider sends the browser back to /login with the result in the fragment rather than the query, so
 // the token never reaches a server log or a Referer header. Read it before anything else can redirect.
@@ -102,11 +104,15 @@ $('register-form').onsubmit = async (e) => {
 
 const providers = await api('/api/oauth/providers').catch(() => []);
 if (providers.length) {
-  $('providers').append(...providers.map(({ key, label }) => Object.assign(document.createElement('a'), {
-    href: `/api/oauth/${key}/start`,
-    textContent: `Continue with ${label}`,
-    className: 'provider',
-  })));
+  $('providers').append(...providers.map(({ key, label }) => {
+    const a = Object.assign(document.createElement('a'), {
+      href: `/api/oauth/${key}/start`,
+      textContent: `Continue with ${label}`,
+      className: 'provider',
+    });
+    a.prepend(icon(key));
+    return a;
+  }));
   $('oauth').hidden = false;
 }
 

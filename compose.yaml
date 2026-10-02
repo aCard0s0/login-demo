@@ -73,6 +73,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: todo
       # Only the public half of the signing key ever crosses this network.
       AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
+      AUTH_TOKEN_VERSIONS_URI: http://auth-service:9081/internal/token-versions
     depends_on:
       db:
         condition: service_healthy

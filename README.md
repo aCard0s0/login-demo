@@ -129,6 +129,7 @@ Endpoint by endpoint:
 | auth | `GET`/`PUT /api/accounts/me` | own | own | own | own |
 | auth | `GET /api/accounts` | everyone | everyone | 403 | 403 |
 | auth | `PUT /api/accounts/{id}/role` | any account | 403 | 403 | 403 |
+| auth | `PUT /api/accounts/{id}/suspended` · `POST /api/accounts/{id}/revoke` | any account | 403 | 403 | 403 |
 | todo | `GET /api/todos` | everyone's | everyone's | own | own |
 | todo | `POST /api/todos` | own | own | own | own |
 | todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | own | own |
@@ -147,6 +148,18 @@ The two services answer "what role is this?" differently, on purpose:
 - **todo-service reads the token's claim**, because asking auth-service per request is exactly what the
   JWKS handoff exists to avoid. A role change lands there when the token is renewed -- within
   `auth.token-ttl`, 30 minutes by default.
+
+### Suspending and revoking
+
+From `/admin`, an admin can **suspend** an account (it cannot log in, by password or provider, and every
+token it holds dies, until it is reactivated) or **revoke its access** (every token it holds dies; it can
+log straight back in). An admin cannot suspend itself.
+
+Both work through a per-account token version, stamped into every token as `ver` and bumped on revoke or
+suspend. auth-service compares it on every request, so both bite there at once. todo-service polls
+`/internal/token-versions` at most every 10 seconds and turns away any token older than the account's last
+revocation. That path is outside `/api`, so the web proxy never forwards it; if auth-service is unreachable
+todo-service keeps the last list it had.
 
 An admin changing *another* account's name, email or password is deliberately not implemented: editing an
 account requires its current password, and bypassing that would be account takeover rather than
@@ -200,7 +213,8 @@ symmetric algorithm is rejected before its signature is looked at.
 The consequences worth knowing:
 
 - **There is no logout endpoint.** A signed token is good until it expires; logging out is the browser
-  dropping the token it holds. `auth.token-ttl` (default 30m) is the real bound.
+  dropping the token it holds. `auth.token-ttl` (default 30m) is the real bound -- unless an admin revokes
+  the account's tokens, see [Suspending and revoking](#suspending-and-revoking).
 - **A restart invalidates every token in flight**, because it mints a new keypair. Accounts and todos are
   not affected. Nothing is written to disk, so there is no private key in this repo to leak.
 - The key carries a `kid`, so adding a second key later is additive rather than a breaking change.
@@ -214,6 +228,9 @@ The consequences worth knowing:
 | auth | GET · PUT | `/api/accounts/me` | yes |
 | auth | GET | `/api/accounts` | yes -- admin and moderator only |
 | auth | PUT | `/api/accounts/{id}/role` | yes -- admin only |
+| auth | PUT | `/api/accounts/{id}/suspended` | yes -- admin only |
+| auth | POST | `/api/accounts/{id}/revoke` | yes -- admin only |
+| auth | GET | `/internal/token-versions` | no -- compose network only, never proxied |
 | auth | GET | `/api/oauth/providers` | no |
 | auth | GET | `/api/oauth/{provider}/start` · `/callback` | no -- 302s the browser walks through |
 | auth | GET | `/api/public/stats` | no |
@@ -234,5 +251,6 @@ auth-service, so the browser stays on one origin and neither service needs CORS 
 
 Ports 9081/9082 rather than 8081/8082: Docker holds those on this machine. Override with `server.port`, and
 point the frontend elsewhere with `AUTH_URL` / `TODO_URL`. todo-service finds the signing key through
-`auth.jwks-uri` (`AUTH_JWKS_URI` in compose), and both services take `SPRING_DATASOURCE_URL`,
+`auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations through `auth.token-versions-uri`
+(`AUTH_TOKEN_VERSIONS_URI`), and both services take `SPRING_DATASOURCE_URL`,
 `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` from the environment.

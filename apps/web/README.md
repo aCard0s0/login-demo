@@ -54,9 +54,11 @@ to publish a port. An upstream that is down answers 502 rather than hanging.
 
 ## Roles in the UI
 
-There are none yet. A moderator or an admin sees exactly the pages a user does -- the extra reach they have
-(`GET /api/accounts`, `PUT /api/accounts/{id}/role`, everyone's todos) is reachable over the API and has no
-controls on any page. See the [root README](../../README.md#roles) for what the roles actually allow.
+An admin gets an **Admin** link in the header and the `/admin` page: every account with its role and status,
+and per account **Suspend** / **Reactivate** and **Revoke access** (sign out everywhere). The link and the
+page read the role out of the token only to decide what to draw; every action is refused server-side for
+anyone but an admin. Role changes (`PUT /api/accounts/{id}/role`) and a moderator's wider reads are still
+API-only. See the [root README](../../README.md#roles) for what the roles actually allow.
 
 ## Configuration
 

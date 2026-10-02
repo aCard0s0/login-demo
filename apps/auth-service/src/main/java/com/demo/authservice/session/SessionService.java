@@ -7,7 +7,9 @@ import com.demo.authservice.support.TooManyAttemptsException;
 import com.demo.authservice.token.Tokens;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.util.Optional;
@@ -54,7 +56,11 @@ public class SessionService {
         }
         failures.clear(cleanEmail);
         Account found = account.get();
-        return Optional.of(new Session(
-                tokens.issue(found.getId(), found.getEmail(), found.getName(), found.getRole().name()), found));
+        // Only after the password checks out, so a stranger cannot use this to learn who is suspended.
+        if (found.isSuspended()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this account is suspended");
+        }
+        return Optional.of(new Session(tokens.issue(found.getId(), found.getEmail(), found.getName(),
+                found.getRole().name(), found.getTokenVersion()), found));
     }
 }

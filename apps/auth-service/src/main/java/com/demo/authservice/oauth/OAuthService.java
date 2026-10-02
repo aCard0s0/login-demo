@@ -2,7 +2,6 @@ package com.demo.authservice.oauth;
 
 import com.demo.authservice.account.Account;
 import com.demo.authservice.account.AccountService;
-import com.demo.authservice.token.Tokens;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -47,12 +46,9 @@ public class OAuthService {
 
     private final AccountService accounts;
 
-    private final Tokens tokens;
-
-    public OAuthService(OAuthProperties config, AccountService accounts, Tokens tokens) {
+    public OAuthService(OAuthProperties config, AccountService accounts) {
         this.config = config;
         this.accounts = accounts;
-        this.tokens = tokens;
     }
 
     /** A verified email and a display name, which is all we take from a provider. */
@@ -93,7 +89,7 @@ public class OAuthService {
     }
 
     public String issue(Account account) {
-        return tokens.issue(account.getId(), account.getEmail(), account.getName(), account.getRole().name());
+        return accounts.issue(account);
     }
 
     /**

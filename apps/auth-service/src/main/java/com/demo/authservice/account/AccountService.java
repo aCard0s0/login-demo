@@ -11,8 +11,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /** The account itself: who exists, what their details are, and which account a caller's token names. */
 @Service
@@ -114,10 +116,18 @@ public class AccountService {
 
     /**
      * Resolves a token to the account it names, or empty if it does not check out. The account is re-read rather
-     * than taken from the token's claims, so a rename shows up straight away instead of at the next login.
+     * than taken from the token's claims, so a rename shows up straight away instead of at the next login, and
+     * a suspension or a revocation bites on the very next request.
      */
     public Optional<Account> byToken(String token) {
-        return tokens.accountIdFrom(token).flatMap(accounts::findById);
+        return tokens.claimsFrom(token).flatMap(claims -> accounts.findById(claims.accountId())
+                .filter(account -> !account.isSuspended() && account.getTokenVersion() == claims.version()));
+    }
+
+    /** A token for the account, stamped with its current version so a later revocation can kill it. */
+    public String issue(Account account) {
+        return tokens.issue(account.getId(), account.getEmail(), account.getName(), account.getRole().name(),
+                account.getTokenVersion());
     }
 
     /** How many accounts exist. Public: a count gives away nothing about who they are. */
@@ -147,6 +157,39 @@ public class AccountService {
                 .orElseThrow(() -> new IllegalArgumentException("account not found"));
         account.setRole(role);
         return accounts.save(account);
+    }
+
+    /**
+     * Suspends or reactivates an account. Suspending also revokes, so the tokens it holds die with it rather
+     * than at their expiry. An admin cannot suspend itself, for the same reason it cannot demote itself.
+     */
+    @Transactional
+    public Account setSuspended(Account admin, Long accountId, boolean suspended) {
+        if (admin.getId().equals(accountId) && suspended) {
+            throw new IllegalArgumentException("an admin cannot suspend itself");
+        }
+        Account account = accounts.findById(accountId)
+                .orElseThrow(() -> new IllegalArgumentException("account not found"));
+        if (suspended && !account.isSuspended()) {
+            account.setTokenVersion(account.getTokenVersion() + 1);
+        }
+        account.setSuspended(suspended);
+        return accounts.save(account);
+    }
+
+    /** Signs an account out everywhere: every token it holds stops working. It can log straight back in. */
+    @Transactional
+    public Account revokeTokens(Long accountId) {
+        Account account = accounts.findById(accountId)
+                .orElseThrow(() -> new IllegalArgumentException("account not found"));
+        account.setTokenVersion(account.getTokenVersion() + 1);
+        return accounts.save(account);
+    }
+
+    /** Every account that has had its tokens revoked, by id, with the version a token must carry to count. */
+    public Map<Long, Integer> tokenVersions() {
+        return accounts.findByTokenVersionGreaterThan(0).stream()
+                .collect(Collectors.toMap(Account::getId, Account::getTokenVersion));
     }
 
     /**

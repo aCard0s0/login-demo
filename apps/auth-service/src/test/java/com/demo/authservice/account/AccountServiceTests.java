@@ -28,9 +28,6 @@ class AccountServiceTests {
     @Autowired
     AccountRepository accounts;
 
-    @Autowired
-    Tokens tokens;
-
     @Test
     void registerHashesThePasswordAndMakesAPlainUser() {
         Account created = auth.register("Ada", "ada@example.com", "correct-horse");
@@ -114,7 +111,7 @@ class AccountServiceTests {
     @Test
     void byTokenResolvesASignedTokenAndRejectsATamperedOne() {
         Account grace = auth.register("Grace", "grace@example.com", "hopper-1906");
-        String token = tokens.issue(grace.getId(), grace.getEmail(), grace.getName(), grace.getRole().name());
+        String token = auth.issue(grace);
 
         assertEquals("grace@example.com", auth.byToken(token).orElseThrow().getEmail());
         assertTrue(auth.byToken(token.substring(0, token.length() - 2)).isEmpty(), "a clipped signature must not verify");
@@ -129,7 +126,7 @@ class AccountServiceTests {
         AccountService stale = new AccountService(accounts, expired);
         Account edsger = stale.register("Edsger", "edsger@example.com", "dijkstra-1930");
         // The same Tokens that signed it does the checking, so only the expiry can be what rejects it.
-        String token = expired.issue(edsger.getId(), edsger.getEmail(), edsger.getName(), edsger.getRole().name());
+        String token = expired.issue(edsger.getId(), edsger.getEmail(), edsger.getName(), edsger.getRole().name(), 0);
 
         assertTrue(stale.byToken(token).isEmpty(), "a token past its expiry must not verify");
     }
@@ -137,9 +134,40 @@ class AccountServiceTests {
     @Test
     void oneServiceCannotVerifyAnotherServicesTokens() throws Exception {
         Account barbara = auth.register("Barbara", "barbara@example.com", "liskov-1939");
-        String token = tokens.issue(barbara.getId(), barbara.getEmail(), barbara.getName(), barbara.getRole().name());
+        String token = auth.issue(barbara);
 
         AccountService other = new AccountService(accounts, new Tokens(Duration.ofMinutes(30)));
         assertTrue(other.byToken(token).isEmpty(), "a different keypair must not accept this token");
+    }
+
+    @Test
+    void suspendingKillsTheTokensAnAccountHoldsAndReactivatingDoesNotRevive() {
+        Account admin = auth.register("Root", "root@example.com", "root-pass-01");
+        Account alan = auth.register("Alan", "turing@example.com", "turing-1912");
+        String before = auth.issue(alan);
+
+        auth.setSuspended(admin, alan.getId(), true);
+        assertTrue(auth.byToken(before).isEmpty(), "a suspended account's token must stop working at once");
+
+        Account back = auth.setSuspended(admin, alan.getId(), false);
+        assertTrue(auth.byToken(before).isEmpty(), "reactivating must not bring an old token back");
+        assertEquals(alan.getId(), auth.byToken(auth.issue(back)).orElseThrow().getId(), "a new token works");
+
+        assertThrows(IllegalArgumentException.class, () -> auth.setSuspended(admin, admin.getId(), true),
+                "an admin must not be able to lock itself out");
+    }
+
+    @Test
+    void revokingKillsEveryLiveTokenButNotTheNextOne() {
+        Account linus = auth.register("Linus", "linus@example.com", "torvalds-1969");
+        String first = auth.issue(linus);
+        String second = auth.issue(linus);
+
+        Account revoked = auth.revokeTokens(linus.getId());
+        assertTrue(auth.byToken(first).isEmpty());
+        assertTrue(auth.byToken(second).isEmpty());
+        assertEquals(revoked.getTokenVersion(), auth.tokenVersions().get(linus.getId()),
+                "todo-service learns the new version from this map");
+        assertTrue(auth.byToken(auth.issue(revoked)).isPresent(), "logging back in still works");
     }
 }
