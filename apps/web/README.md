@@ -1,6 +1,6 @@
 # web
 
-Static pages and the `/api` proxy. Port **3000**, and the only container that publishes one.
+Static pages and the `/api` (and `/mcp`) proxy. Port **3000**, and the only container that publishes one.
 
 No framework, no build step, no dependencies: `server.js` is plain Node using only `node:http` and
 `node:fs/promises`, and `package.json` lists no dependencies at all. Nothing here is compiled, bundled or
@@ -14,9 +14,12 @@ minified, so what is in `public/` is what the browser gets.
 | `/login` | Log in, create an account, or continue with a configured provider. |
 | `/todos` | Your todos. Bounces to `/login` without a token. |
 | `/account` | Change your name, email or password. |
+| `/agents` | Your agents: create one, delete one, see each one's servers and access at a glance. |
+| `/agent?id=` | One agent: its instructions, its MCP servers and their READ/WRITE, access to your other agents, how to connect to it, and its activity. |
+| `/admin` | Admin only: accounts, suspend and revoke. |
 
 ```
-public/index.html  login.html  todos.html  account.html
+public/index.html  login.html  todos.html  account.html  agents.html  agent.html  admin.html
        app.js      token handling, the api() helper, the shared header
        style.css
 server.js          the fixed URL map and the /api proxy
@@ -25,7 +28,7 @@ server.js          the fixed URL map and the /api proxy
 `server.js` serves pages from a **closed map** of URL to filename rather than resolving paths, so no request
 can walk its way out of `public/`.
 
-`app.js` is shared by all four pages so they cannot drift apart: it holds the token in `sessionStorage`, adds
+`app.js` is shared by every page so they cannot drift apart: it holds the token in `sessionStorage`, adds
 the `Authorization` header to every call, renders the one header, and turns a `{"error": "..."}` body into a
 thrown `Error` the pages display. A 401 while holding a token clears the session and bounces to
 `/login?expired`; a 401 without one is just a failed login.
@@ -45,12 +48,23 @@ password does.
 
 ## The proxy
 
-`/api/todos*` and `/api/public/todos*` go to todo-service, and the rest of `/api/*` to auth-service. Method,
+`/mcp`, `/api/agents*` and `/api/public/agents*` go to agent-service, `/api/todos*` and `/api/public/todos*`
+to todo-service, and the rest of `/api/*` to auth-service. Method,
 path, headers and body are passed through untouched, so PATCH, the `Authorization` header, the OAuth state
 cookie and the 302s of the provider flow all need nothing special.
 
-The point is that the browser stays on one origin: neither service needs CORS configuration, and neither has
-to publish a port. An upstream that is down answers 502 rather than hanging.
+The point is that the browser stays on one origin: no service needs CORS configuration, and none has to
+publish a port. An upstream that is down answers 502 rather than hanging. `/mcp` is the one path outside
+`/api` that is forwarded: it is where an external agent connects, with the query string naming the agent.
+
+## Agents in the UI
+
+`/agents` and `/agent` talk to agent-service only. The detail page edits everything in place -- a server's
+access `<select>` saves on change, so flipping READ to WRITE while an agent is connected is a one-click way to
+watch its next tool call obey it -- and refreshes the activity table after every save. **Create token** asks
+agent-service for a 30-day agent token and shows it once, inside a ready `claude mcp add` line; it is not
+stored anywhere in the browser. A stored authorization header shows only as *header set*; the value is never
+sent back.
 
 ## Roles in the UI
 
@@ -67,18 +81,19 @@ API-only. See the [root README](../../README.md#roles) for what the roles actual
 | `PORT` | `3000` |
 | `AUTH_URL` | `http://localhost:9081` |
 | `TODO_URL` | `http://localhost:9082` |
+| `AGENT_URL` | `http://localhost:9083` |
 
 ## Running it alone
 
 ```bash
-node apps/web/server.js     # with both services already up
+node apps/web/server.js     # with the three services already up
 ```
 
 ## Tests
 
 `auth.test.js` covers the authentication paths only: the proxy leg to auth-service (method, body,
-`Authorization` header and the provider 302 pass through; a dead upstream answers a JSON 502) and the
-401 rules in `app.js`. Plain `node --test`, no dependencies.
+`Authorization` header and the provider 302 pass through; a dead upstream answers a JSON 502), the routing
+of `/api/agents*` to agent-service, and the 401 rules in `app.js`. Plain `node --test`, no dependencies.
 
 ```bash
 npm test --prefix apps/web

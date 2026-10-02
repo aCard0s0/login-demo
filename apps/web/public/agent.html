@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent &middot; login-demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header></header>
+
+  <main>
+    <h1 id="title">Agent</h1>
+    <p class="error" id="error"></p>
+    <p class="ok" id="done"></p>
+
+    <form id="edit-form">
+      <label>Name<input id="name" required maxlength="100"></label>
+      <label>Instructions <small>(what a connecting agent is told on connect)</small><textarea id="instructions"></textarea></label>
+      <label>
+        Access to your other agents
+        <select id="others">
+          <option value="NONE">NONE -- it cannot see them</option>
+          <option value="READ">READ -- it can read their setup and history</option>
+          <option value="WRITE">WRITE -- it can also change their setup</option>
+        </select>
+        <small>An agent can never change its own setup, whatever this says.</small>
+      </label>
+      <button>Save</button>
+    </form>
+
+    <h2>MCP servers</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>URL</th><th>Access</th><th>Auth</th><th></th></tr></thead>
+        <tbody id="servers"></tbody>
+      </table>
+    </div>
+    <form id="server-form">
+      <input id="server-name" placeholder="name (a-z, 0-9, _ -)" pattern="[a-z0-9_-]{1,20}" required>
+      <input id="server-url" placeholder="https://host/mcp" type="url" required>
+      <select id="server-access"><option value="READ">READ</option><option value="WRITE">WRITE</option></select>
+      <button id="add-server">Add server</button>
+      <label>
+        <input id="server-forward" type="checkbox" style="width:auto"> Send my login token as its Authorization header
+        <small>-- for servers in this demo that check who you are, like the built-in todos one.</small>
+      </label>
+      <label>
+        Authorization header <small>(optional, for servers that need one; stored, never shown again)</small>
+        <input id="server-auth" placeholder="Bearer …" autocomplete="off">
+      </label>
+    </form>
+
+    <h2>Connect</h2>
+    <p class="note">
+      This agent is an MCP server. Point Claude Code, Cursor or any MCP client at
+      <code id="mcp-url"></code> with a token in its <code>Authorization</code> header: your own login token
+      works for half an hour; a token made here lasts 30 days and is shown once.
+    </p>
+    <form id="token-form">
+      <button id="token">Create token</button>
+      <small>Revoking access on your account kills every token ever made here.</small>
+    </form>
+    <pre class="reply" id="connect"></pre>
+
+    <h2>Activity</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
+        <tbody id="activity"></tbody>
+      </table>
+    </div>
+    <p class="note" id="no-activity" hidden>Nothing yet.</p>
+
+    <p class="note">
+      <b>READ</b> offers the agent only the tools a server marks read-only; <b>WRITE</b> offers them all.
+      Permissions are checked by agent-service on every single tool call, against what is saved right now --
+      change one while an agent is connected and its next call obeys it. A refused call shows here as
+      <span class="badge tool_denied">tool_denied</span>.
+    </p>
+  </main>
+
+<script type="module">
+import { $, api, icon, requireLogin } from '/app.js';
+
+const id = new URLSearchParams(location.search).get('id');
+
+const button = (text, name, onclick) => {
+  const b = Object.assign(document.createElement('button'), { textContent: text, onclick });
+  if (name) b.prepend(icon(name));
+  return b;
+};
+const cell = (...children) => {
+  const td = document.createElement('td');
+  td.append(...children);
+  return td;
+};
+const badge = (text) => Object.assign(document.createElement('span'), { className: `badge ${text.toLowerCase()}`, textContent: text });
+const accessSelect = (value, onchange) => {
+  const s = document.createElement('select');
+  for (const v of ['READ', 'WRITE']) s.append(new Option(v, v, false, v === value));
+  s.onchange = () => onchange(s.value);
+  return s;
+};
+
+const say = (ok, err) => {
+  $('error').textContent = err || '';
+  $('done').textContent = ok || '';
+};
+
+const patchServer = (sid, body, success) => act(() => api(`/api/agents/${id}/servers/${sid}`, { method: 'PATCH', body: JSON.stringify(body) }), success);
+
+const renderAgent = async () => {
+  const a = await api(`/api/agents/${id}`);
+  document.title = `${a.name} · login-demo`;
+  $('title').textContent = a.name;
+  // Only fill the form when the user is not mid-edit, so a refresh after a save does not eat their typing.
+  if (document.activeElement?.form !== $('edit-form')) {
+    $('name').value = a.name;
+    $('instructions').value = a.instructions;
+    $('others').value = a.othersAccess;
+  }
+  $('servers').replaceChildren(...a.servers.map((s) => {
+    const tr = document.createElement('tr');
+    const url = cell(s.url);
+    url.className = 'detail';
+    const auth = cell();
+    const forward = Object.assign(document.createElement('input'), { type: 'checkbox', checked: s.forwardCallerToken, title: 'send my login token' });
+    forward.onchange = () => patchServer(s.id, { forwardCallerToken: forward.checked }, `${s.name}: ${forward.checked ? 'sends' : 'no longer sends'} your token.`);
+    const header = Object.assign(document.createElement('small'), { textContent: s.hasAuthHeader ? 'header set' : 'no header' });
+    auth.append(forward, document.createTextNode(' token '), header);
+    const actions = cell(
+      button(s.hasAuthHeader ? 'Clear header' : 'Set header', null, () => {
+        const value = s.hasAuthHeader ? '' : prompt(`Authorization header value for ${s.name}:`);
+        if (value === null) return;
+        patchServer(s.id, { authHeader: value }, `${s.name}: header ${value ? 'set' : 'cleared'}.`);
+      }),
+      button('Remove', 'remove', () => {
+        if (confirm(`Remove server ${s.name} from this agent?`)) {
+          act(() => api(`/api/agents/${id}/servers/${s.id}`, { method: 'DELETE' }), `${s.name} removed.`);
+        }
+      }),
+    );
+    actions.className = 'actions';
+    tr.append(cell(s.name), url, cell(accessSelect(s.access, (v) => patchServer(s.id, { access: v }, `${s.name} is now ${v}.`))), auth, actions);
+    return tr;
+  }));
+};
+
+const renderActivity = async () => {
+  const rows = await api(`/api/agents/${id}/activity`);
+  $('no-activity').hidden = rows.length > 0;
+  $('activity').replaceChildren(...rows.map((r) => {
+    const tr = document.createElement('tr');
+    const when = cell(new Date(r.at).toLocaleTimeString());
+    when.className = 'when';
+    when.title = new Date(r.at).toLocaleString();
+    const detail = cell(r.detail);
+    detail.className = 'detail';
+    tr.append(when, cell(badge(r.kind)), detail);
+    return tr;
+  }));
+};
+
+const refresh = () => Promise.all([renderAgent(), renderActivity()]).catch((err) => say('', err.message));
+
+const act = async (action, success) => {
+  say();
+  try {
+    await action();
+    say(success);
+  } catch (err) {
+    say('', err.message);
+  }
+  await refresh();
+};
+
+$('edit-form').onsubmit = (e) => {
+  e.preventDefault();
+  $('name').blur();
+  act(() => api(`/api/agents/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name: $('name').value, instructions: $('instructions').value, othersAccess: $('others').value }),
+  }), 'Saved.');
+};
+
+$('server-form').onsubmit = (e) => {
+  e.preventDefault();
+  act(async () => {
+    await api(`/api/agents/${id}/servers`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: $('server-name').value,
+        url: $('server-url').value,
+        access: $('server-access').value,
+        forwardCallerToken: $('server-forward').checked,
+        authHeader: $('server-auth').value || null,
+      }),
+    });
+    $('server-form').reset();
+  }, 'Server added.');
+};
+
+const mcpUrl = `${location.origin}/mcp?agent=${id}`;
+$('mcp-url').textContent = mcpUrl;
+
+// The token is shown once, with the one command that uses it; it is never sent back by the server again.
+$('token-form').onsubmit = (e) => {
+  e.preventDefault();
+  act(async () => {
+    const { token } = await api(`/api/agents/${id}/token`, { method: 'POST' });
+    const name = $('name').value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'agent';
+    $('connect').textContent = [
+      `# Claude Code -- copy now, this token is not shown again`,
+      `claude mcp add --transport http ${name} "${mcpUrl}" --header "Authorization: Bearer ${token}"`,
+      ``,
+      `# any other client: POST ${mcpUrl}`,
+      `Authorization: Bearer ${token}`,
+    ].join('\n');
+  }, 'Token created.');
+};
+
+if (requireLogin()) {
+  if (!id) {
+    say('', 'No agent chosen.');
+  } else {
+    refresh();
+  }
+}
+</script>
+</body>
+</html>

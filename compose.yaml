@@ -1,4 +1,4 @@
-# Only web publishes a port. The two services and the database talk over the compose network,
+# Only web publishes a port. The three services and the database talk over the compose network,
 # which is the same shape as production: the browser reaches everything through the one origin.
 services:
   db:
@@ -38,6 +38,9 @@ services:
       # refuses to start the stack without them, rather than quietly coming up with nobody in charge.
       ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env — copy .env.example}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env — copy .env.example}
+      # What agent-service must present to have an agent token minted. Required, like the admin credentials:
+      # /internal/agent-tokens hands out credentials, so "on the compose network" alone must not be enough.
+      AUTH_INTERNAL_SECRET: ${INTERNAL_SECRET:?set INTERNAL_SECRET in .env — copy .env.example}
       # Sign-in with Google and GitHub, off unless .env fills a provider in. Defaulted rather than
       # required: a provider with no credentials is simply not offered, so .env need not mention these.
       # The redirect base is the address the browser uses, which is web's published port, not this service.
@@ -85,16 +88,50 @@ services:
       timeout: 3s
       retries: 20
 
+  agent-service:
+    build:
+      context: .
+      target: agent-service
+    # Same JVM arithmetic as the other two; this one also carries the MCP server and client. Measured when it
+    # still carried a model SDK too, see the resources section of the README; it has only lost weight since.
+    mem_limit: 320m
+    cpus: 1.0
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=50
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/agent
+      SPRING_DATASOURCE_USERNAME: agent
+      SPRING_DATASOURCE_PASSWORD: agent
+      AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
+      AUTH_TOKEN_VERSIONS_URI: http://auth-service:9081/internal/token-versions
+      # Where the long-lived token an external agent connects with is minted. Compose-internal, like /internal/token-versions.
+      AUTH_AGENT_TOKENS_URI: http://auth-service:9081/internal/agent-tokens
+      AUTH_INTERNAL_SECRET: ${INTERNAL_SECRET:?set INTERNAL_SECRET in .env — copy .env.example}
+      # The built-in MCP server every new agent starts with. Compose-internal: the browser never sees it.
+      AGENTS_TODO_MCP_URL: http://todo-service:9082/mcp
+    depends_on:
+      db:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      todo-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9083/api/public/agents/stats || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   web:
     build:
       context: .
       target: web
-    # Plain node with no dependencies: it reads four small files and pipes sockets.
+    # Plain node with no dependencies: it reads a few small files and pipes sockets.
     mem_limit: 64m
     cpus: 0.5
     environment:
       AUTH_URL: http://auth-service:9081
       TODO_URL: http://todo-service:9082
+      AGENT_URL: http://agent-service:9083
     ports:
       - "3000:3000"
     depends_on:
@@ -102,6 +139,14 @@ services:
         condition: service_healthy
       todo-service:
         condition: service_healthy
+      agent-service:
+        condition: service_healthy
+    # So `start` (compose up --wait) returns once node is actually listening, and `verify` right after it works.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/public/stats || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
 volumes:
   db-data:

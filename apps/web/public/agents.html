@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agents &middot; login-demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header></header>
+
+  <main>
+    <h1>Your agents</h1>
+    <form id="agent-form">
+      <input id="name" placeholder="Name, e.g. todo helper" required maxlength="100">
+      <button id="create">Create</button>
+      <label>
+        Instructions <small>(its system prompt; optional)</small>
+        <textarea id="instructions" placeholder="You help me keep my todo list tidy."></textarea>
+      </label>
+    </form>
+    <p class="error" id="error"></p>
+    <p class="ok" id="done"></p>
+    <div class="table-wrap" id="list" hidden>
+      <table>
+        <thead><tr><th>Agent</th><th>MCP servers</th><th>Other agents</th><th></th></tr></thead>
+        <tbody id="agents"></tbody>
+      </table>
+    </div>
+    <p class="note" id="empty" hidden>No agents yet.</p>
+
+    <p class="note">
+      Every new agent starts with the built-in <b>todos</b> MCP server as <b>READ</b>: it can list your todos
+      and nothing more until you say otherwise. Open an agent to add servers, set READ or WRITE on each, grant
+      it access to your other agents, connect Claude Code or any other MCP client to it, and see what it did
+      -- and what it was refused.
+    </p>
+  </main>
+
+<script type="module">
+import { $, api, icon, requireLogin } from '/app.js';
+
+const button = (text, name, onclick) => {
+  const b = Object.assign(document.createElement('button'), { textContent: text, onclick });
+  b.prepend(icon(name));
+  return b;
+};
+
+const cell = (...children) => {
+  const td = document.createElement('td');
+  td.append(...children);
+  return td;
+};
+
+const badge = (text) => Object.assign(document.createElement('span'), { className: `badge ${text.toLowerCase()}`, textContent: text });
+
+const render = async () => {
+  const agents = await api('/api/agents');
+  $('empty').hidden = agents.length > 0;
+  $('list').hidden = agents.length === 0;
+  $('agents').replaceChildren(...agents.map((a) => {
+    const tr = document.createElement('tr');
+    // textContent throughout: names are whatever the owner typed.
+    const open = Object.assign(document.createElement('a'), { href: `/agent?id=${a.id}`, textContent: a.name });
+    const servers = cell();
+    servers.append(...a.servers.flatMap((s) => {
+      const span = Object.assign(document.createElement('span'), { className: 'inline' });
+      span.append(document.createTextNode(s.name + ' '), badge(s.access));
+      return [span, document.createTextNode(' ')];
+    }));
+    if (!a.servers.length) servers.append(Object.assign(document.createElement('small'), { textContent: 'none' }));
+    const actions = cell(button('Delete', 'remove', () => act(`Delete ${a.name} and its history?`,
+      () => api(`/api/agents/${a.id}`, { method: 'DELETE' }), `${a.name} deleted.`)));
+    actions.className = 'actions';
+    tr.append(cell(open), servers, cell(badge(a.othersAccess)), actions);
+    return tr;
+  }));
+};
+
+const act = async (question, action, success) => {
+  if (question && !confirm(question)) return;
+  $('error').textContent = '';
+  $('done').textContent = '';
+  try {
+    await action();
+    $('done').textContent = success;
+  } catch (err) {
+    $('error').textContent = err.message;
+  }
+  await render().catch((err) => { $('error').textContent = err.message; });
+};
+
+$('agent-form').onsubmit = (e) => {
+  e.preventDefault();
+  act(null, async () => {
+    const created = await api('/api/agents', {
+      method: 'POST',
+      body: JSON.stringify({ name: $('name').value, instructions: $('instructions').value }),
+    });
+    $('name').value = '';
+    $('instructions').value = '';
+    location.href = `/agent?id=${created.id}`;
+  }, 'Created.');
+};
+
+if (requireLogin()) {
+  render().catch((err) => { $('error').textContent = err.message; });
+}
+</script>
+</body>
+</html>

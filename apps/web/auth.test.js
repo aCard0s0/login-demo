@@ -18,23 +18,32 @@ const auth = createServer((req, res) => {
   });
 });
 
+// A stand-in agent-service, so a request meant for it can be seen arriving there and not at auth-service.
+const seenByAgent = [];
+const agent = createServer((req, res) => {
+  seenByAgent.push({ method: req.method, url: req.url });
+  res.writeHead(200, { 'content-type': 'application/json' }).end('[]');
+});
+
 let web, base;
 before(async () => {
   auth.listen(0);
   await once(auth, 'listening');
+  agent.listen(0);
+  await once(agent, 'listening');
   const free = createServer().listen(0);
   await once(free, 'listening');
   const port = free.address().port;
   free.close();
   web = spawn(process.execPath, ['server.js'], {
     cwd: import.meta.dirname,
-    env: { ...process.env, PORT: port, AUTH_URL: `http://localhost:${auth.address().port}` },
+    env: { ...process.env, PORT: port, AUTH_URL: `http://localhost:${auth.address().port}`, AGENT_URL: `http://localhost:${agent.address().port}` },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   await once(web.stdout, 'data');
   base = `http://localhost:${port}`;
 });
-after(() => { web.kill(); auth.close(); });
+after(() => { web.kill(); auth.close(); agent.close(); });
 
 test('POST /api/login reaches auth-service with method, body and status intact', async () => {
   const res = await fetch(`${base}/api/login`, { method: 'POST', body: '{"email":"a@b.c","password":"x"}' });
@@ -48,6 +57,21 @@ test('Authorization header passes through untouched', async () => {
   await fetch(`${base}/api/accounts/me`, { headers: { authorization: 'Bearer t0k' } });
   assert.equal(seen.at(-1).url, '/api/accounts/me');
   assert.equal(seen.at(-1).headers.authorization, 'Bearer t0k');
+});
+
+test('/api/agents and /api/public/agents reach agent-service, not auth-service', async () => {
+  const before = seen.length;
+  const res = await fetch(`${base}/api/agents/7/activity?x=1`, { headers: { authorization: 'Bearer t0k' } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), []);
+  assert.equal(seenByAgent.at(-1).url, '/api/agents/7/activity?x=1');
+  await fetch(`${base}/api/public/agents/stats`);
+  assert.equal(seenByAgent.at(-1).url, '/api/public/agents/stats');
+  // The MCP endpoint an external agent connects to: the query string names the agent and must survive.
+  await fetch(`${base}/mcp?agent=7`, { method: 'POST', body: '{}' });
+  assert.equal(seenByAgent.at(-1).method, 'POST');
+  assert.equal(seenByAgent.at(-1).url, '/mcp?agent=7');
+  assert.equal(seen.length, before, 'auth-service saw none of it');
 });
 
 test('provider start returns the 302 for the browser to follow, not the proxy', async () => {

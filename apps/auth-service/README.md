@@ -246,7 +246,8 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 | PUT | `/api/accounts/{id}/role` | `{role}` -- admin only, else 403 |
 | PUT | `/api/accounts/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |
 | POST | `/api/accounts/{id}/revoke` | no body -- admin only; kills every token the account holds |
-| GET | `/internal/token-versions` | `{accountId: version}` for every revoked account; todo-service polls it |
+| GET | `/internal/token-versions` | `{accountId: version}` for every revoked account; todo-service and agent-service poll it |
+| POST | `/internal/agent-tokens` | `{accountId, agentId}` -> `{token}`: a 30-day `AGENT` token for one agent; agent-service asks, with `X-Internal-Secret`, else 403 |
 | GET | `/api/oauth/providers` | `[{key, label}]` -- the configured providers, no token |
 | GET | `/api/oauth/{provider}/start` | 302 to consent, or 404 if that provider is off -- no token |
 | GET | `/api/oauth/{provider}/callback` | 302 to `/login#token=...&name=...&role=...` or `/login#error=...` -- no token |
@@ -263,6 +264,8 @@ unknown path -- which `AuthExceptionAdvice` is responsible for.
 |---|---|---|
 | `server.port` | `SERVER_PORT` | `9081` |
 | `auth.token-ttl` | `AUTH_TOKEN_TTL` | `30m` |
+| `auth.agent-token-ttl` | `AUTH_AGENT_TOKEN_TTL` | `30d` -- the tokens `/internal/agent-tokens` mints |
+| `auth.internal-secret` | `AUTH_INTERNAL_SECRET` | `dev-internal-secret` -- what `/internal/agent-tokens` demands as `X-Internal-Secret`; blank closes it; compose requires `INTERNAL_SECRET` in `.env` |
 | `admin.email` | `ADMIN_EMAIL` | empty -- no admin is seeded |
 | `admin.password` | `ADMIN_PASSWORD` | empty -- no admin is seeded |
 | `oauth.redirect-base-url` | `OAUTH_REDIRECT_BASE_URL` | `http://localhost:3000` -- the frontend's address |

@@ -28,6 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         // What compose passes in from .env. Set here too, so the seeded admin is part of the contract.
         "admin.email=admin@example.com",
         "admin.password=admin-pass-01",
+        // What agent-service sends as X-Internal-Secret; compose passes the same INTERNAL_SECRET to both.
+        "auth.internal-secret=test-internal-secret",
 })
 @AutoConfigureMockMvc
 class ApiContractTests {
@@ -254,5 +256,48 @@ class ApiContractTests {
         mvc.perform(get("/internal/token-versions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$['" + hedyId + "']").value(2));
+    }
+
+    /** The token agent-service hands an external agent: the owner as subject, AGENT as role, the agent pinned by claim. */
+    @Test
+    void anAgentTokenNamesTheOwnerAndOneAgentAndDiesWithTheOwnersTokens() throws Exception {
+        String ada = register("Ada", "ada-agent@example.com", "lovelace-1815");
+        long adaId = idOf(ada);
+
+        // Being on the network is not enough: without the shared secret nothing is minted.
+        mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("internal secret missing or wrong"));
+        mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "wrong").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                .andExpect(status().isForbidden());
+
+        String body = mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isString())
+                .andReturn().getResponse().getContentAsString();
+        String token = body.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+        com.nimbusds.jwt.JWTClaimsSet claims = com.nimbusds.jwt.SignedJWT.parse(token).getJWTClaimsSet();
+        assertEquals(String.valueOf(adaId), claims.getSubject());
+        assertEquals("AGENT", claims.getStringClaim("role"));
+        assertEquals(42L, claims.getLongClaim("agent"));
+        long days = java.time.Duration.between(java.time.Instant.now(), claims.getExpirationTime().toInstant()).toDays();
+        assertEquals(29, days, "30 days, minus the seconds this test took");
+
+        // It is a token like any other: /api/accounts/me answers it, and a revoke kills it.
+        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(adaId));
+        String admin = login("admin@example.com", "admin-pass-01");
+        mvc.perform(post("/api/accounts/" + adaId + "/revoke").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
+        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+
+        mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":999999,\"agentId\":1}"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("account not found"));
+        mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + adaId + "}"))
+                .andExpect(status().isBadRequest());
     }
 }
