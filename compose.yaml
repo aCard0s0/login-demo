@@ -1,4 +1,4 @@
-# Only web publishes a port. The two services and the database talk over the compose network,
+# Only web publishes a port. The three services and the database talk over the compose network,
 # which is the same shape as production: the browser reaches everything through the one origin.
 services:
   db:
@@ -85,16 +85,49 @@ services:
       timeout: 3s
       retries: 20
 
+  agent-service:
+    build:
+      context: .
+      target: agent-service
+    # Same JVM arithmetic as the other two; this one also carries the Anthropic and MCP clients. Measured,
+    # see the resources section of the README.
+    mem_limit: 320m
+    cpus: 1.0
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=50
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/agent
+      SPRING_DATASOURCE_USERNAME: agent
+      SPRING_DATASOURCE_PASSWORD: agent
+      AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
+      AUTH_TOKEN_VERSIONS_URI: http://auth-service:9081/internal/token-versions
+      # The built-in MCP server every new agent starts with. Compose-internal: the browser never sees it.
+      AGENTS_TODO_MCP_URL: http://todo-service:9082/mcp
+      # Optional, from .env. Without it every page works and Run answers 503, rather than the stack not starting.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      todo-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9083/api/public/agents/stats || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   web:
     build:
       context: .
       target: web
-    # Plain node with no dependencies: it reads four small files and pipes sockets.
+    # Plain node with no dependencies: it reads a few small files and pipes sockets.
     mem_limit: 64m
     cpus: 0.5
     environment:
       AUTH_URL: http://auth-service:9081
       TODO_URL: http://todo-service:9082
+      AGENT_URL: http://agent-service:9083
     ports:
       - "3000:3000"
     depends_on:
@@ -102,6 +135,14 @@ services:
         condition: service_healthy
       todo-service:
         condition: service_healthy
+      agent-service:
+        condition: service_healthy
+    # So `start` (compose up --wait) returns once node is actually listening, and `verify` right after it works.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/public/stats || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
 volumes:
   db-data:

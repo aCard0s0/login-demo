@@ -15,11 +15,12 @@
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>login-demo</name>
-    <description>Multi-module demo: auth-service + todo-service + web frontend</description>
+    <description>Multi-module demo: auth-service + todo-service + agent-service + web frontend</description>
 
     <modules>
         <module>apps/auth-service</module>
         <module>apps/todo-service</module>
+        <module>apps/agent-service</module>
     </modules>
 
     <properties>
@@ -27,7 +28,22 @@
         <!-- Not managed by the Spring Boot BOM, unlike everything else here. -->
         <sqlite-jdbc.version>3.47.1.0</sqlite-jdbc.version>
         <nimbus-jose-jwt.version>10.5</nimbus-jose-jwt.version>
+        <!-- The 2.x line is the Jackson 3 one, matching Spring Boot 4; 0.x is Jackson 2. -->
+        <mcp-bom.version>2.0.0</mcp-bom.version>
+        <anthropic-java.version>2.34.0</anthropic-java.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-bom</artifactId>
+                <version>${mcp-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>

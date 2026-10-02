@@ -1,18 +1,19 @@
 # login-demo
 
-Multi-module Maven project: two Spring Boot services plus a dependency-free Node frontend. Accounts and
-logins in one service, todos in another, and an RS256 token handoff between them instead of a per-request
-call.
+Multi-module Maven project: three Spring Boot services plus a dependency-free Node frontend. Accounts and
+logins in one service, todos in another, user-owned AI agents with permissioned MCP servers in a third, and
+an RS256 token handoff between them instead of a per-request call.
 
 ```
 login-demo              the one script that runs this repo
 pom.xml                 parent (packaging: pom)
-compose.yaml            db + the three services
-Dockerfile              one file, one build, three runtime stages
+compose.yaml            db + the four services
+Dockerfile              one file, one build, four runtime stages
 docker/initdb.sql       one database and one role per service
-.env.example            the admin credentials and OAuth client secrets compose reads from .env
+.env.example            the admin credentials, OAuth client secrets and Anthropic key compose reads from .env
 apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
-apps/todo-service       per-account todos                       :9082
+apps/todo-service       per-account todos, and their MCP server  :9082
+apps/agent-service      agents, their MCP servers, permissions   :9083
 apps/web                static pages + /api proxy               :3000
 ```
 
@@ -21,16 +22,17 @@ Each service documents itself:
 | | What it owns | README |
 |---|---|---|
 | auth-service | accounts, passwords, roles, OAuth sign-in, the signing key | [apps/auth-service](apps/auth-service/README.md) |
-| todo-service | todos, and verifying tokens locally | [apps/todo-service](apps/todo-service/README.md) |
-| web | the four pages and the one-origin proxy | [apps/web](apps/web/README.md) |
+| todo-service | todos, verifying tokens locally, and the `/mcp` server an agent uses | [apps/todo-service](apps/todo-service/README.md) |
+| agent-service | agents, the MCP servers each may use, READ/WRITE enforced per tool call | [apps/agent-service](apps/agent-service/README.md) |
+| web | the pages and the one-origin proxy | [apps/web](apps/web/README.md) |
 
 ## Package convention
 
-Both services are split by what the code is *about*, not by which layer it sits in. A package holds one
+The services are split by what the code is *about*, not by which layer it sits in. A package holds one
 subject end to end -- entity, service, controller and its request/response records together -- so a change
 to one subject stays inside one folder. Each service README has its own tree.
 
-Two rules hold across both:
+Two rules hold across all of them:
 
 - **The arrows point one way.** `token` knows nothing about accounts (it signs an id, an email, a name and a
   role -- not an `Account`), `account` uses `token` to resolve a caller, and `session` uses both to turn a
@@ -46,7 +48,7 @@ cp .env.example .env      # then change the admin password
 ./login-demo start
 ```
 
-Open http://localhost:3000. Four containers: `db`, `auth-service`, `todo-service`, `web`.
+Open http://localhost:3000. Five containers: `db`, `auth-service`, `todo-service`, `agent-service`, `web`.
 
 `./login-demo` with no arguments prints every command it has; `./login-demo <command> --help` explains one.
 The ones worth knowing: `dev` runs the stack in the foreground, `status` and `logs` say what it is doing,
@@ -67,14 +69,22 @@ docker compose up -d db
 ./mvnw package
 java -jar apps/auth-service/target/auth-service-0.0.1-SNAPSHOT.jar &
 java -jar apps/todo-service/target/todo-service-0.0.1-SNAPSHOT.jar &
+java -jar apps/agent-service/target/agent-service-0.0.1-SNAPSHOT.jar &
 node apps/web/server.js
 ```
 
 ### Databases
 
-Postgres, with a database and a role per service (`auth`/`auth`, `todo`/`todo`, created by
-`docker/initdb.sql`), so neither service can read the other's tables even by accident. The credentials are
+Postgres, with a database and a role per service (`auth`/`auth`, `todo`/`todo`, `agent`/`agent`, created by
+`docker/initdb.sql`), so no service can read another's tables even by accident. The credentials are
 development values and the `db` container publishes no port; change them before this goes anywhere real.
+
+`docker/initdb.sql` runs only when the volume is created. A stack that predates agent-service has no `agent`
+database, so either start over with `./login-demo db reset` or add it to the volume you have:
+
+```bash
+./login-demo exec db psql -U postgres -c "CREATE USER agent WITH PASSWORD 'agent';" -c "CREATE DATABASE agent OWNER agent;"
+```
 
 Tests are the exception: they run against a throwaway SQLite file so `./mvnw test` needs nothing installed
 or running. That means the test suite does not exercise the same database the services actually use.
@@ -82,16 +92,18 @@ or running. That means the test suite does not exercise the same database the se
 ### Resources
 
 Every container is capped, and the caps are measured rather than guessed. Under a burst of 200
-authenticated reads and 40 logins the whole stack sits at 490 MiB with nothing OOM-killed:
+authenticated reads and 40 logins the first four sit at 490 MiB with nothing OOM-killed; agent-service was
+measured idle after `verify`:
 
 | Container | `mem_limit` | measured | `cpus` |
 |---|---|---|---|
 | auth-service | 288m | ~205 MiB (71%) | 1.0 |
 | todo-service | 288m | ~206 MiB (71%) | 1.0 |
+| agent-service | 320m | ~217 MiB (68%) | 1.0 |
 | db | 192m | ~68 MiB (35%) | 0.5 |
 | web | 64m | ~18 MiB (27%) | 0.5 |
 
-The two services are the floor, not the ceiling: a JVM's resident size is mostly metaspace, code cache,
+The JVM services are the floor, not the ceiling: a JVM's resident size is mostly metaspace, code cache,
 thread stacks and the GC's own structures, none of which shrink much for a small application. Both run
 with `-XX:MaxRAMPercentage=50`, so the heap is half the limit and the rest of that list has somewhere to
 live -- the JVM reads the cgroup limit, so `mem_limit` is what actually sizes the heap. Postgres cannot go
@@ -120,7 +132,8 @@ Four of them, on the account row and carried in the token: `ADMIN`, `MODERATOR`,
 | **AGENT** | yes | yes | no | no | no |
 | **USER** | yes | yes | no | no | no |
 
-`AGENT` is reserved and currently behaves exactly like `USER`; nothing grants it yet.
+`AGENT` is reserved and currently behaves exactly like `USER`; nothing grants it. The agents on `/agents` are
+not accounts and do not use it: they run as their owner, see [Agents](#agents).
 
 Endpoint by endpoint:
 
@@ -133,8 +146,10 @@ Endpoint by endpoint:
 | todo | `GET /api/todos` | everyone's | everyone's | own | own |
 | todo | `POST /api/todos` | own | own | own | own |
 | todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | own | own |
+| agent | everything under `/api/agents` | own | own | own | own |
 
-A todo belonging to someone else comes back **404, not 403**, so neither answer says whether it exists.
+A todo -- or an agent -- belonging to someone else comes back **404, not 403**, so neither answer says whether
+it exists. Agents are the one thing no role sees across accounts, an admin included.
 
 Registration always produces a `USER` -- `POST /api/accounts` has no role field to ask with, and
 `PUT /api/accounts/me` cannot change one. `PUT /api/accounts/{id}/role` is the single door off `USER`, and
@@ -178,6 +193,29 @@ exactly as it is, so a restart cannot quietly reset a password the admin has sin
 
 Details, including why it is not in `docker/initdb.sql`, are in the
 [auth-service README](apps/auth-service/README.md#the-seeded-admin).
+
+## Agents
+
+From `/agents`, any user creates as many **agents** as they like. An agent is a name, a system prompt, a list
+of **MCP servers** each marked **READ** or **WRITE**, and one setting for how far it may reach into the
+owner's *other* agents. **Run** asks Claude (`ANTHROPIC_API_KEY` in `.env`; optional, Run answers 503 without
+it) with exactly the tools those permissions allow.
+
+The permission is the service's, not the prompt's. **READ** offers the model only the tools a server
+annotates `readOnlyHint: true` and refuses any other; **WRITE** offers them all. Every tool call is checked
+again by agent-service against the row as it is saved *at that moment*, so flipping a server from WRITE to
+READ on the page while a run is going is obeyed from the next call. What ran and what was refused is in the
+agent's activity log on the same page.
+
+Every new agent starts with the built-in **todos** server as READ: todo-service exposes its todos over MCP at
+`/mcp`, with `list_todos` read-only and `add_todo`, `update_todo`, `delete_todo` not. The agent runs **as its
+owner** -- the owner's own token is forwarded to that server -- so it can only ever see the owner's todos.
+Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header.
+
+An agent reads or changes the owner's other agents only when its **other agents** setting says READ or WRITE,
+through built-in tools scoped to the same owner; it can never change its own setup. Details, the activity
+kinds and the deliberate limitations (it will POST to any URL an owner types) are in the
+[agent-service README](apps/agent-service/README.md).
 
 ## Signing in with Google or GitHub
 
@@ -238,19 +276,29 @@ The consequences worth knowing:
 | todo | GET · POST | `/api/todos` | yes |
 | todo | PUT · PATCH · DELETE | `/api/todos/{id}` | yes |
 | todo | GET | `/api/public/todos/stats` | no |
+| todo | POST | `/mcp` | yes -- MCP, compose network only, never proxied |
+| agent | GET · POST | `/api/agents` | yes |
+| agent | GET · PATCH · DELETE | `/api/agents/{id}` | yes -- owner only |
+| agent | POST | `/api/agents/{id}/servers` · `PATCH`/`DELETE .../servers/{sid}` | yes -- owner only |
+| agent | GET | `/api/agents/{id}/activity` | yes -- owner only |
+| agent | POST | `/api/agents/{id}/run` | yes -- owner only; 503 without an API key |
+| agent | GET | `/api/public/agents/stats` | no |
 
 Request and response bodies are in each service's README:
-[auth-service](apps/auth-service/README.md#endpoints), [todo-service](apps/todo-service/README.md#endpoints).
+[auth-service](apps/auth-service/README.md#endpoints), [todo-service](apps/todo-service/README.md#endpoints),
+[agent-service](apps/agent-service/README.md#endpoints).
 
 The token travels in the `Authorization: Bearer <token>` header rather than a query parameter so it stays
 out of access logs and Referer headers. Rejected input comes back as `{"error": "..."}` from both services,
 which is what the pages render.
 
-The Node server proxies `/api/todos*` and `/api/public/todos*` to todo-service and the rest of `/api/*` to
-auth-service, so the browser stays on one origin and neither service needs CORS config.
+The Node server proxies `/api/agents*` and `/api/public/agents*` to agent-service, `/api/todos*` and
+`/api/public/todos*` to todo-service and the rest of `/api/*` to auth-service, so the browser stays on one
+origin and no service needs CORS config.
 
-Ports 9081/9082 rather than 8081/8082: Docker holds those on this machine. Override with `server.port`, and
-point the frontend elsewhere with `AUTH_URL` / `TODO_URL`. todo-service finds the signing key through
-`auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations through `auth.token-versions-uri`
-(`AUTH_TOKEN_VERSIONS_URI`), and both services take `SPRING_DATASOURCE_URL`,
-`SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` from the environment.
+Ports 9081/9082/9083 rather than 8081/8082/8083: Docker holds those on this machine. Override with
+`server.port`, and point the frontend elsewhere with `AUTH_URL` / `TODO_URL` / `AGENT_URL`. todo-service and
+agent-service find the signing key through `auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations
+through `auth.token-versions-uri` (`AUTH_TOKEN_VERSIONS_URI`); agent-service finds the built-in todo MCP
+server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`); and all three services take
+`SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` from the environment.

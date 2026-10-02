@@ -33,8 +33,8 @@ cd "$ROOT"
 # ── config: every knob env-overridable, every name prefixed with the tool ──
 PROJECT="${LOGIN_DEMO_PROJECT:-login-demo}"; PORT="${LOGIN_DEMO_PORT:-3000}"
 COMPOSE_FILE="${LOGIN_DEMO_COMPOSE_FILE:-$ROOT/compose.yaml}"
-SERVICES="db auth-service todo-service web"   # valid targets; feeds help and did-you-mean
-MODULES="auth-service todo-service"           # the two Maven modules, a subset of SERVICES
+SERVICES="db auth-service todo-service agent-service web"   # valid targets; feeds help and did-you-mean
+MODULES="auth-service todo-service agent-service"          # the Maven modules, a subset of SERVICES
 DRY_RUN=""; ASSUME_YES=""; VERBOSE=""; TMP_DIR=""; CURRENT_CMD=""
 TARGETS=(); OPT_BUILD=""; OPT_NOCACHE=""
 # ── output: colour only on a TTY; values on stdout, prose on stderr ──
@@ -242,7 +242,7 @@ cmd_down() {
     shift
   done
   require_docker
-  if [ -n "$vols" ]; then confirm "delete every '$PROJECT' data volume? every account and todo goes with it"; fi
+  if [ -n "$vols" ]; then confirm "delete every '$PROJECT' data volume? every account, todo and agent goes with it"; fi
   local f=(down --remove-orphans); [ -z "$vols" ] || f+=(--volumes)
   compose "${f[@]}"; say "removed containers and network${vols:+, and the data volumes}"
 }
@@ -278,7 +278,7 @@ cmd_shell() {
 cmd_shell_help() { say "  Every image here is Alpine or Debian-slim, so the shell is sh, not bash."; }
 cmd_db_reset() {
   no_args "$@"; require_docker
-  confirm "throw away the '$PROJECT' database? every account and todo goes with it"
+  confirm "throw away the '$PROJECT' database? every account, todo and agent goes with it"
   step "recreating the database"
   compose stop                         # the services hold connections open
   compose rm -fs db
@@ -332,11 +332,25 @@ cmd_verify() {
     die "todo-service served a list with no token at all" 1
   fi
 
-  say "ok — auth-service signed a JWT, todo-service verified it locally, the round trip came back"
-  note "this left an account behind: $email"
+  step "creating an agent"
+  local agent
+  agent=$(curl -fsS -X POST "$base/api/agents" -H "Authorization: Bearer $token" \
+    -H 'content-type: application/json' -d '{"name":"verify agent"}') \
+    || die "agent-service rejected the token — check it can reach the JWKS endpoint" 1
+  case "$agent" in *'"name":"todos"'*'"access":"READ"'*) ;; *) die "a new agent did not start with the built-in todo server as READ: $agent" 1 ;; esac
+  id=$(printf '%s' "$agent" | sed -E 's/^\{"id":([0-9]+).*/\1/')
+  curl -fsS -o /dev/null "$base/api/agents/$id/activity" -H "Authorization: Bearer $token" \
+    || die "the agent's activity log could not be read back" 1
+  if curl -fsS -o /dev/null "$base/api/agents" 2>/dev/null; then
+    die "agent-service served a list with no token at all" 1
+  fi
+
+  say "ok — auth-service signed a JWT, todo-service and agent-service verified it locally, the round trip came back"
+  note "this left an account, a todo and an agent behind: $email"
+  note "running an agent needs ANTHROPIC_API_KEY and is not part of verify; use Run on /agent"
 }
-cmd_verify_help() { say "  Needs a running stack. It writes: one account and one todo, both real, both"
-                    say "  left behind. \`$PROG db reset\` is how you clear them out."; }
+cmd_verify_help() { say "  Needs a running stack. It writes: one account, one todo and one agent, all real, all"
+                    say "  left behind. \`$PROG db reset\` is how you clear them out. It never calls the model."; }
 cmd_doctor() {
   no_args "$@"
   local missing=0 broken=0

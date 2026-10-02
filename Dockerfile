@@ -7,7 +7,7 @@ COPY apps apps
 # Cache mount rather than a copy-poms-first dance: one line, and it survives changes to the module list.
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -DskipTests package
 
-# Shared runtime: a JRE and an unprivileged user, so neither service runs as root.
+# Shared runtime: a JRE and an unprivileged user, so no service runs as root.
 FROM eclipse-temurin:26-jre-alpine AS runtime
 RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
@@ -21,6 +21,11 @@ CMD ["java", "-jar", "app.jar"]
 FROM runtime AS todo-service
 COPY --from=build /src/apps/todo-service/target/todo-service-*.jar app.jar
 EXPOSE 9082
+CMD ["java", "-jar", "app.jar"]
+
+FROM runtime AS agent-service
+COPY --from=build /src/apps/agent-service/target/agent-service-*.jar app.jar
+EXPOSE 9083
 CMD ["java", "-jar", "app.jar"]
 
 # No dependencies to install: server.js is plain node with an empty package.json.

@@ -15,12 +15,13 @@ together.
 
 ```
 todo/     Todo  TodoRepository  TodoService  TodoController  NewTodo  UpdateTodo  TodoResponse
-token/    JwtVerifier  Caller
+mcp/      TodoMcpServer
+token/    JwtVerifier  Revocations  Caller
 stats/    StatsController  PublicStats
 support/  TodoExceptionAdvice
 ```
 
-`todo` depends on `token` for who the caller is; nothing points back. `stats` is the unauthenticated corner,
+`todo` depends on `token` for who the caller is; `mcp` depends on both and nothing points back. `stats` is the unauthenticated corner,
 kept apart so the trust boundary shows up in the tree.
 
 ## Who is asking
@@ -71,6 +72,28 @@ list.
 It is in the todo response because a role that reads everyone would otherwise get a list it could not make
 sense of. For everybody else it is their own id, which tells them nothing they did not already know.
 
+## The MCP server
+
+The same todos, reachable by an agent at `POST /mcp` (MCP Streamable HTTP, stateless). `TodoMcpServer` wires
+the SDK's servlet transport in and registers four tools, each the thin MCP face of one `TodoService` method,
+so the owner rules above apply to an agent exactly as they do to the browser:
+
+| tool | `readOnlyHint` | does |
+|---|---|---|
+| `list_todos` | **true** | the caller's todos, one per line as `#id [x] title` |
+| `add_todo {title}` | | `POST /api/todos` |
+| `update_todo {id, title?, done?}` | | `PATCH /api/todos/{id}` |
+| `delete_todo {id}` | | `DELETE /api/todos/{id}` |
+
+Who is asking comes from the `Authorization` header on the MCP request -- agent-service forwards the token of
+the user who started the agent -- and is checked by the same `JwtVerifier`. No or a bad token makes every
+tool answer an error result rather than a list.
+
+The annotation column is the point: agent-service's **READ** permission offers an agent only the tools a
+server marks `readOnlyHint: true`, so leaving it off a tool that writes is the one thing this class must
+never do. `/mcp` sits outside `/api`, so the web proxy never forwards it; only agent-service reaches it over
+the compose network.
+
 ## Endpoints
 
 | Method | Path | Body / notes |
@@ -81,8 +104,9 @@ sense of. For everybody else it is their own id, which tells them nothing they d
 | PATCH | `/api/todos/{id}` | `{title?, done?}` -- only the fields sent change |
 | DELETE | `/api/todos/{id}` | |
 | GET | `/api/public/todos/stats` | `{todos}` -- no token |
+| POST | `/mcp` | MCP Streamable HTTP, see above -- compose network only |
 
-Everything except the last needs `Authorization: Bearer <token>`. A null field in a PATCH means "leave it
+Everything except the public count needs `Authorization: Bearer <token>`. A null field in a PATCH means "leave it
 alone", so renaming a todo cannot flip its done flag by omitting it. Every rejection comes back as
 `{"error": "..."}` in the same shape auth-service uses, which `TodoExceptionAdvice` is responsible for.
 
@@ -105,4 +129,6 @@ docker compose up -d db                  # it still needs a database
 
 Tests: `TodoServiceTests` for the ownership and role rules, `JwtVerifierTests` for the token check -- the
 only thing standing between a stranger and somebody's todo list, so it runs against a real throwaway JWKS
-server rather than a mock.
+server rather than a mock -- and `TodoMcpServerTests`, which drives `/mcp` with the real MCP client over real
+HTTP: the annotation on `list_todos` and on nothing else, two callers who cannot see each other's todos, and
+a missing token answered with an error result.
