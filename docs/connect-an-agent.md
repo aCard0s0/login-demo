@@ -8,8 +8,10 @@ it is offered and checks every call against the agent's READ/WRITE settings as t
 
 1. Log in at http://localhost:3000, open **Agents**, create or open an agent.
 2. The **Connect** section shows the URL: `http://localhost:3000/mcp?agent=<id>`.
-3. Click **Create token**. The token is shown once, inside a ready-made `claude mcp add` line. Copy it now;
-   it is never shown or stored again. It lives 30 days.
+3. Click **Create token**. The token is shown once, with a **Copy** button and a client picker that renders
+   the matching config -- the `claude mcp add` line, a `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`,
+   an `mcp-remote` entry for Claude Desktop, or a `curl`. Copy it now; it is never shown or stored again. It
+   lives 30 days.
 
 Alternatively, your own login token (the one the browser holds, 30 minutes) works in the same header.
 
@@ -27,6 +29,10 @@ AGENT_TOKEN=$(curl -s -X POST "http://localhost:3000/api/agents/$AGENT/token" -H
 ## 2. Point your agent at it
 
 Transport is **Streamable HTTP**, auth is a plain `Authorization: Bearer <token>` header.
+
+An agent token names its agent in a claim, so with one the URL can be just `http://localhost:3000/mcp` and
+`?agent=<id>` may be left off. A login token has no such claim and needs it. The examples below keep the
+parameter so they work with either token.
 
 **Claude Code**
 
@@ -116,7 +122,7 @@ curl -s -X POST "http://localhost:3000/mcp?agent=<id>" \
 |---|---|
 | `invalid or expired token` | wrong, expired or revoked token; make a new one on the agent's page |
 | `no such agent` | the `agent=` id is not yours, or the agent token is for a different agent |
-| `which agent? connect to /mcp?agent=<id>` | the query parameter is missing |
+| `which agent? connect to /mcp?agent=<id>, or use an agent token` | a login token with no `agent=` parameter; an agent token needs none |
 | a tool is missing from the list | the server is READ and the tool is not annotated read-only, or `othersAccess` is NONE |
 | `denied: needs WRITE on server '…' (has READ)` | the call was made anyway; change the access on the page |
 | `server 'x': could not connect` in Activity | the attached URL is unreachable from inside the compose network |
