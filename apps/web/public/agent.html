@@ -55,13 +55,35 @@
     <p class="note">
       This agent is an MCP server. Point Claude Code, Cursor or any MCP client at
       <code id="mcp-url"></code> with a token in its <code>Authorization</code> header: your own login token
-      works for half an hour; a token made here lasts 30 days and is shown once.
+      works for half an hour; a token made here lasts 30 days, is shown once, and already names this agent,
+      so with it the URL is just <code id="mcp-base"></code>.
     </p>
     <form id="token-form">
       <button id="token">Create token</button>
       <small>Revoking access on your account kills every token ever made here.</small>
     </form>
-    <pre class="reply" id="connect"></pre>
+    <div id="connect" hidden>
+      <p class="ok">Token created. Copy it now -- it is not stored and will not be shown again.</p>
+      <label>
+        Token
+        <span class="inline"><input id="token-value" readonly autocomplete="off"><button type="button" id="copy-token">Copy</button></span>
+      </label>
+      <label>
+        Client
+        <span class="inline">
+          <select id="client">
+            <option value="claude">Claude Code -- one command</option>
+            <option value="mcpjson">Claude Code -- .mcp.json in the project</option>
+            <option value="cursor">Cursor -- .cursor/mcp.json</option>
+            <option value="vscode">VS Code -- .vscode/mcp.json</option>
+            <option value="desktop">Claude Desktop -- via mcp-remote</option>
+            <option value="curl">curl -- tools/list by hand</option>
+          </select>
+          <button type="button" id="copy-snippet">Copy</button>
+        </span>
+      </label>
+      <pre class="reply" id="snippet"></pre>
+    </div>
 
     <h2>Activity</h2>
     <div class="table-wrap">
@@ -203,20 +225,49 @@ $('server-form').onsubmit = (e) => {
 
 const mcpUrl = `${location.origin}/mcp?agent=${id}`;
 $('mcp-url').textContent = mcpUrl;
+$('mcp-base').textContent = `${location.origin}/mcp`;
 
-// The token is shown once, with the one command that uses it; it is never sent back by the server again.
+// The token is shown once, with the config for whichever client the user picks; the server never sends it again.
+// An agent token carries the agent id in a claim, so the snippets use the plain /mcp URL.
+const json = (o) => JSON.stringify(o, null, 2);
+const tokenUrl = `${location.origin}/mcp`;
+const snippets = {
+  claude: (name, token) => `claude mcp add --transport http ${name} "${tokenUrl}" --header "Authorization: Bearer ${token}"`,
+  mcpjson: (name, token) => json({ mcpServers: { [name]: { type: 'http', url: tokenUrl, headers: { Authorization: `Bearer ${token}` } } } }),
+  cursor: (name, token) => json({ mcpServers: { [name]: { url: tokenUrl, headers: { Authorization: `Bearer ${token}` } } } }),
+  vscode: (name, token) => json({ servers: { [name]: { type: 'http', url: tokenUrl, headers: { Authorization: `Bearer ${token}` } } } }),
+  desktop: (name, token) => json({ mcpServers: { [name]: { command: 'npx', args: ['-y', 'mcp-remote', tokenUrl, '--header', `Authorization: Bearer ${token}`] } } }),
+  curl: (name, token) => [
+    `curl -s -X POST "${tokenUrl}" \\`,
+    `  -H "Authorization: Bearer ${token}" \\`,
+    `  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \\`,
+    `  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`,
+  ].join('\n'),
+};
+const renderSnippet = () => {
+  const name = $('name').value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'agent';
+  $('snippet').textContent = snippets[$('client').value](name, $('token-value').value);
+};
+const copy = async (text, what) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    say(`${what} copied.`);
+  } catch {
+    say('', 'Clipboard blocked by the browser; select the text and copy it by hand.');
+  }
+};
+$('client').onchange = renderSnippet;
+$('copy-token').onclick = () => copy($('token-value').value, 'Token');
+$('copy-snippet').onclick = () => copy($('snippet').textContent, 'Snippet');
+$('token-value').onclick = (e) => e.target.select();
+
 $('token-form').onsubmit = (e) => {
   e.preventDefault();
   act(async () => {
     const { token } = await api(`/api/agents/${id}/token`, { method: 'POST' });
-    const name = $('name').value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'agent';
-    $('connect').textContent = [
-      `# Claude Code -- copy now, this token is not shown again`,
-      `claude mcp add --transport http ${name} "${mcpUrl}" --header "Authorization: Bearer ${token}"`,
-      ``,
-      `# any other client: POST ${mcpUrl}`,
-      `Authorization: Bearer ${token}`,
-    ].join('\n');
+    $('token-value').value = token;
+    $('connect').hidden = false;
+    renderSnippet();
   }, 'Token created.');
 };
 

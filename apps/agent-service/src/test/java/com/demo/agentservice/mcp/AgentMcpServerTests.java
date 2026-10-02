@@ -266,13 +266,18 @@ class AgentMcpServerTests {
                     "the agent token is what gets forwarded, so a downstream server sees the owner");
         }
 
-        // An agent token for another agent, another account, no token, no agent id: each refused, nothing learned.
+        // The agent token names its agent, so plain /mcp works with it.
+        try (McpSyncClient client = connect("agent-tok", null)) {
+            assertEquals(List.of("fake__read_thing"), names(client));
+        }
+
+        // An agent token for another agent, another account, no token, a login token with no agent id: each refused, nothing learned.
         pinned = other.getId();
         assertRefused(() -> connect("agent-tok", agent.getId()), "no such agent");
         assertRefused(() -> connect("tok-101", agent.getId()), "no such agent");
         assertRefused(() -> connect(null, agent.getId()), "invalid or expired token");
         assertRefused(() -> connect("tok-100", null), "which agent? connect to /mcp?agent=<id>");
-        assertEquals(1, log(agent.getId(), Activity.CONNECTED).size(), "only the one accepted connection is in the log");
+        assertEquals(2, log(agent.getId(), Activity.CONNECTED).size(), "only the two accepted connections are in the log");
     }
 
     /** The client wraps the server's JSON-RPC error a couple of times; the reason is somewhere down the cause chain. */
