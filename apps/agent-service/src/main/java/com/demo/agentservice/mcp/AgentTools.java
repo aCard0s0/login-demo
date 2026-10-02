@@ -12,6 +12,7 @@ import com.demo.agentservice.agent.UpdateMcpServer;
 import com.demo.agentservice.token.Caller;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import io.modelcontextprotocol.spec.McpSchema.ToolAnnotations;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
@@ -81,11 +82,11 @@ class AgentTools {
         if (write ? !now.writes() : !now.reads()) {
             throw new AccessDenied("needs othersAccess " + (write ? "WRITE" : "READ") + " (has " + now + ")");
         }
-        Long id = name.equals("list_agents") ? null : id(args, "id");
-        if (write && selfId.equals(id)) {
-            throw new AccessDenied("an agent cannot change its own configuration");
-        }
         try {
+            Long id = name.equals("list_agents") ? null : id(args, "id");
+            if (write && selfId.equals(id)) {
+                throw new AccessDenied("an agent cannot change its own configuration");
+            }
             return ToolResult.ok(switch (name) {
                 case "list_agents" -> agents.list(caller).stream()
                         .filter(a -> !a.getId().equals(selfId))
@@ -161,7 +162,7 @@ class AgentTools {
         try {
             return Long.valueOf(String.valueOf(value));
         } catch (NumberFormatException e) {
-            throw new AccessDenied(key + " must be a number");
+            throw bad(key + " must be a number");
         }
     }
 
@@ -174,7 +175,7 @@ class AgentTools {
         try {
             return Access.valueOf(String.valueOf(args.get("access")).toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new AccessDenied("access must be READ or WRITE");
+            throw bad("access must be READ or WRITE");
         }
     }
 
@@ -186,7 +187,12 @@ class AgentTools {
         try {
             return OthersAccess.valueOf(String.valueOf(value).toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new AccessDenied("othersAccess must be NONE, READ or WRITE");
+            throw bad("othersAccess must be NONE, READ or WRITE");
         }
+    }
+
+    /** A malformed argument is the model's mistake, not a refusal: an error result, never a {@code tool_denied} line. */
+    private static ResponseStatusException bad(String why) {
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, why);
     }
 }

@@ -22,6 +22,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,13 +48,20 @@ class JwtVerifierTests {
             Caller caller = verifier.callerOf("Bearer " + token(advertised, "42", later, "MODERATOR"));
             assertEquals("42", caller.accountId());
             assertEquals("MODERATOR", caller.role());
-            assertTrue(caller.readsEveryone());
-            assertFalse(caller.writesEveryone(), "only an admin writes everyone");
+            assertNull(caller.agentId(), "only an agent token is pinned to an agent");
+            assertTrue(caller.mayActAs(5L));
 
             // Nothing is obliged to put a role in a token, so its absence has to mean the smallest one.
             Caller roleless = verifier.callerOf("Bearer " + token(advertised, "42", later, null));
             assertEquals("USER", roleless.role());
-            assertFalse(roleless.readsEveryone());
+
+            // An agent token is pinned to the one agent in its claim; one that names none is refused, not unpinned.
+            Caller agent = verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, 9L));
+            assertEquals(9L, agent.agentId());
+            assertTrue(agent.mayActAs(9L));
+            assertFalse(agent.mayActAs(10L));
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT")),
+                    "an AGENT token with no agent claim would otherwise act as every agent of the owner");
 
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf(token(impostor, "42", later, "ADMIN")),
                     "a token signed by a key auth-service never published must not be accepted");
@@ -81,7 +89,14 @@ class JwtVerifierTests {
     }
 
     private static String token(RSAKey key, String subject, Instant expiry, String role, Integer version) throws Exception {
+        return token(key, subject, expiry, role, version, null);
+    }
+
+    private static String token(RSAKey key, String subject, Instant expiry, String role, Integer version, Long agent) throws Exception {
         JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder().subject(subject).expirationTime(Date.from(expiry));
+        if (agent != null) {
+            claims.claim("agent", agent);
+        }
         if (role != null) {
             claims.claim("role", role);
         }

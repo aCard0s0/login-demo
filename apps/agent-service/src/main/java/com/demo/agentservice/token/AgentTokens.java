@@ -24,18 +24,22 @@ public class AgentTokens {
 
     private final String uri;
 
-    public AgentTokens(@Value("${auth.agent-tokens-uri}") String uri) {
+    private final String secret;
+
+    public AgentTokens(@Value("${auth.agent-tokens-uri}") String uri, @Value("${auth.internal-secret}") String secret) {
         JdkClientHttpRequestFactory requests = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build());
         requests.setReadTimeout(Duration.ofSeconds(5));
         this.http = RestClient.builder().requestFactory(requests).build();
         this.uri = uri;
+        this.secret = secret;
     }
 
     /** A fresh token naming the owner and this one agent. Never stored here: the owner sees it once. */
     public String issue(String accountId, Long agentId) {
         try {
-            Map<?, ?> body = http.post().uri(uri).contentType(MediaType.APPLICATION_JSON)
+            // The shared secret is what tells auth-service this is agent-service asking and not just anything on the network.
+            Map<?, ?> body = http.post().uri(uri).header("X-Internal-Secret", secret).contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of("accountId", Long.valueOf(accountId), "agentId", agentId))
                     .retrieve().body(Map.class);
             if (body == null || !(body.get("token") instanceof String token)) {

@@ -25,6 +25,8 @@ import io.modelcontextprotocol.spec.McpSchema.JSONRPCResponse.JSONRPCError;
 import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -77,6 +79,8 @@ public class AgentMcpServer {
 
     static final class Handler implements McpStatelessServerHandler {
 
+        private static final Logger log = LoggerFactory.getLogger(Handler.class);
+
         private final McpJsonMapper json = McpJsonDefaults.getMapper();
         private final List<String> protocolVersions;
         private final AgentService agents;
@@ -106,6 +110,12 @@ public class AgentMcpServer {
                     int code = e.getStatusCode() == HttpStatus.NOT_IMPLEMENTED ? ErrorCodes.METHOD_NOT_FOUND : ErrorCodes.INVALID_REQUEST;
                     return JSONRPCResponse.error(request.id(), new JSONRPCError(code,
                             e.getReason() == null ? e.getStatusCode().toString() : e.getReason()));
+                } catch (IllegalArgumentException e) {
+                    // params that do not fit the method's shape: a JSON-RPC error the client can read, not a 500.
+                    return JSONRPCResponse.error(request.id(), new JSONRPCError(ErrorCodes.INVALID_PARAMS, "invalid params for " + request.method()));
+                } catch (RuntimeException e) {
+                    log.warn("{} failed", request.method(), e);
+                    return JSONRPCResponse.error(request.id(), new JSONRPCError(ErrorCodes.INTERNAL_ERROR, "internal error"));
                 }
             });
         }
@@ -162,8 +172,9 @@ public class AgentMcpServer {
                 activity.record(s.agent().getId(), Activity.TOOL_DENIED, in.name() + ": " + denied.getMessage());
                 result = ToolResult.error("denied: " + denied.getMessage());
             } catch (RuntimeException e) {
+                // The owner's log gets the detail; the model gets a flat message, not our hostnames and stack.
                 activity.record(s.agent().getId(), Activity.TOOL_CALL, what + " -> error: " + ActivityLog.brief(e.getMessage()));
-                result = ToolResult.error("error: " + e.getMessage());
+                result = ToolResult.error("error: the tool call failed; the agent's activity log has the detail");
             }
             return CallToolResult.builder()
                     .addTextContent(result.text().isEmpty() ? "(empty)" : result.text())

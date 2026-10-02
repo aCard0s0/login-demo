@@ -10,14 +10,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -71,5 +74,21 @@ class ApiContractTests {
                 .andExpect(jsonPath("$[0].kind").value("config_changed"))
                 .andExpect(jsonPath("$[0].detail").value("agent token issued"));
         mvc.perform(get("/api/public/agents/stats")).andExpect(status().isOk()).andExpect(jsonPath("$.agents").isNumber());
+    }
+
+    /** The token an agent connects with opens /mcp and nothing else: here it could widen its own access or mint more tokens. */
+    @Test
+    void anAgentTokenIsRefusedOnTheRestApiEvenForItsOwnAgent() throws Exception {
+        Long mine = agents.create(new Caller("3", "USER"), new NewAgent("mine", "", null)).getId();
+        Long todos = agents.get(new Caller("3", "USER"), mine).getServers().get(0).getId();
+        when(jwt.callerOf("Bearer agent")).thenReturn(new Caller("3", "AGENT", mine));
+
+        mvc.perform(get("/api/agents").header("Authorization", "Bearer agent")).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("an agent token can only connect to /mcp"));
+        mvc.perform(patch("/api/agents/" + mine + "/servers/" + todos).header("Authorization", "Bearer agent")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"access\":\"WRITE\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/agents/" + mine + "/token").header("Authorization", "Bearer agent")).andExpect(status().isForbidden());
+        assertEquals("READ", agents.get(new Caller("3", "USER"), mine).getServers().get(0).getAccess().name(), "nothing it tried may have stuck");
     }
 }

@@ -28,6 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         // What compose passes in from .env. Set here too, so the seeded admin is part of the contract.
         "admin.email=admin@example.com",
         "admin.password=admin-pass-01",
+        // What agent-service sends as X-Internal-Secret; compose passes the same INTERNAL_SECRET to both.
+        "auth.internal-secret=test-internal-secret",
 })
 @AutoConfigureMockMvc
 class ApiContractTests {
@@ -262,7 +264,16 @@ class ApiContractTests {
         String ada = register("Ada", "ada-agent@example.com", "lovelace-1815");
         long adaId = idOf(ada);
 
-        String body = mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
+        // Being on the network is not enough: without the shared secret nothing is minted.
+        mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("internal secret missing or wrong"));
+        mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "wrong").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                .andExpect(status().isForbidden());
+
+        String body = mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret")
+                        .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isString())
@@ -282,10 +293,10 @@ class ApiContractTests {
         mvc.perform(post("/api/accounts/" + adaId + "/revoke").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
         mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
 
-        mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"accountId\":999999,\"agentId\":1}"))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("account not found"));
-        mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"accountId\":" + adaId + "}"))
                 .andExpect(status().isBadRequest());
     }

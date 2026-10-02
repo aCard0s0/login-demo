@@ -57,6 +57,10 @@ public class JwtVerifier {
             Object role = claims.getClaim("role");
             // An agent token carries the one agent it was minted for; any other token carries none.
             Long agent = "AGENT".equals(role) ? claims.getLongClaim("agent") : null;
+            // Without the claim the pin would silently become "every agent of the owner": refuse instead.
+            if ("AGENT".equals(role) && agent == null) {
+                throw new IllegalStateException("agent token names no agent");
+            }
             return new Caller(claims.getSubject(), role == null ? "USER" : String.valueOf(role), agent);
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid or expired token");

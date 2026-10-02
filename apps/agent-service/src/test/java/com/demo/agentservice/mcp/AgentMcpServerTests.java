@@ -229,6 +229,9 @@ class AgentMcpServerTests {
             assertEquals("no such agent", text(theirs));
             assertEquals("denied: needs othersAccess WRITE (has READ)",
                     text(client.callTool(new CallToolRequest("update_agent", Map.of("id", sibling.getId(), "name", "renamed")))));
+            CallToolResult malformed = client.callTool(new CallToolRequest("get_agent", Map.of("id", "seven")));
+            assertTrue(Boolean.TRUE.equals(malformed.isError()));
+            assertEquals("id must be a number", text(malformed), "a bad argument is the model's mistake, not a refusal");
             assertEquals("sibling", agents.get(OWNER, sibling.getId()).getName());
 
             // WRITE: the sibling can be changed, and both logs say so; the agent itself stays out of reach.
@@ -247,6 +250,7 @@ class AgentMcpServerTests {
         List<String> denied = log(agent.getId(), Activity.TOOL_DENIED);
         assertEquals("update_agent: an agent cannot change its own configuration", denied.get(0));
         assertEquals("set_mcp_access: an agent cannot change its own configuration", denied.get(1));
+        assertTrue(denied.stream().noneMatch(d -> d.contains("must be a number")), "malformed arguments are not refusals: " + denied);
     }
 
     @Test
@@ -291,8 +295,11 @@ class AgentMcpServerTests {
             assertEquals("Only ever list.", hello.instructions());
             assertEquals("agent-service: lonely", hello.serverInfo().name());
             assertEquals(List.of(), names(client));
+            assertEquals(List.of(), names(client), "listed again, as clients do");
         }
-        assertTrue(log(agent.getId(), Activity.TOOL_CALL).get(0).startsWith("server 'todos': could not connect"));
+        List<String> calls = log(agent.getId(), Activity.TOOL_CALL);
+        assertEquals(1, calls.size(), "one line for the dead server, however often the tools are listed: " + calls);
+        assertTrue(calls.get(0).startsWith("server 'todos': could not connect"));
         assertTrue(log(agent.getId(), Activity.CONNECTED).get(0).startsWith("Java SDK MCP Client"), log(agent.getId(), Activity.CONNECTED).toString());
 
         Agent quiet = agents.create(OWNER, new NewAgent("quiet", "", OthersAccess.NONE));

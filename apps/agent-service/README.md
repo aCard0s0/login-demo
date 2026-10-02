@@ -42,7 +42,9 @@ agent's id in an `agent` claim, and a 30-day life. `/mcp` accepts a token when i
 and, for an agent token, the claim names that very agent. Whatever token the client connected with is what a
 server row marked *forward caller token* receives as its `Authorization` header -- which is how the built-in
 todo server knows whose todos to show, and why a READ agent cannot see anybody else's. Agents are not
-accounts; the `AGENT` role lives only on these tokens and behaves like `USER` everywhere.
+accounts; the `AGENT` role lives only on these tokens. It behaves like `USER` at auth-service and todo-service,
+but `/api/agents/*` answers it **403**: an agent token that could edit agents would widen its own access or
+mint itself fresh tokens, the very thing the agent tools refuse.
 
 ## The permission rule
 
@@ -138,6 +140,7 @@ back as `{"error": "..."}` like everywhere else.
 | `auth.jwks-uri` | `AUTH_JWKS_URI` | `http://localhost:9081/api/jwks.json` |
 | `auth.token-versions-uri` | `AUTH_TOKEN_VERSIONS_URI` | `http://localhost:9081/internal/token-versions` |
 | `auth.agent-tokens-uri` | `AUTH_AGENT_TOKENS_URI` | `http://localhost:9081/internal/agent-tokens` |
+| `auth.internal-secret` | `AUTH_INTERNAL_SECRET` | `dev-internal-secret` -- sent as `X-Internal-Secret` when asking for a token; compose requires `INTERNAL_SECRET` in `.env` |
 | `spring.datasource.*` | `SPRING_DATASOURCE_*` | `jdbc:postgresql://localhost:5432/agent`, `agent` / `agent` |
 | `agents.todo-mcp-url` | `AGENTS_TODO_MCP_URL` | `http://localhost:9082/mcp`; blank seeds no server |
 

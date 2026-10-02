@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -46,29 +47,38 @@ final class McpTools {
      * written to the log and skipped, so one dead URL does not hide the others.
      */
     static List<Tool> list(Agent agent, String bearer, ActivityLog activity) {
-        List<Tool> offered = new ArrayList<>();
+        Map<String, Tool> offered = new LinkedHashMap<>();
         for (AgentMcpServer server : agent.getServers()) {
             try (McpSyncClient client = connect(server, bearer)) {
                 for (Tool tool : client.listTools().tools()) {
                     if (server.getAccess().allows(readOnly(tool))) {
-                        offered.add(renamed(server, tool));
+                        Tool mine = renamed(server, tool);
+                        // Two long names cut to the same 64 characters: offer neither as that name, rather than one at random.
+                        if (offered.putIfAbsent(mine.name(), mine) != null) {
+                            log.warn("agent {} server '{}': tool '{}' truncates to '{}' like another; not offered", agent.getId(), server.getName(), tool.name(), mine.name());
+                            offered.remove(mine.name());
+                        }
                     }
                 }
             } catch (Exception e) {
-                activity.record(agent.getId(), Activity.TOOL_CALL,
+                // Clients list tools often; one line per failure, not one per listing, or the log is nothing else.
+                activity.recordOnce(agent.getId(), Activity.TOOL_CALL,
                         "server '" + server.getName() + "': could not connect: " + ActivityLog.brief(e.getMessage()));
             }
         }
-        return offered;
+        return new ArrayList<>(offered.values());
     }
 
     /** Runs one tool on the server its name points at, after checking that server's row as it is right now. */
     static ToolResult call(Agent agent, String bearer, String name, Map<String, Object> args) {
         AgentMcpServer server = serverOf(agent, name);
         try (McpSyncClient client = connect(server, bearer)) {
-            Tool tool = client.listTools().tools().stream()
-                    .filter(t -> offeredName(server.getName(), t.name()).equals(name)).findFirst()
-                    .orElseThrow(() -> new AccessDenied("no such tool: " + name));
+            List<Tool> matching = client.listTools().tools().stream()
+                    .filter(t -> offeredName(server.getName(), t.name()).equals(name)).toList();
+            if (matching.size() > 1) {
+                throw new AccessDenied("ambiguous tool: " + matching.size() + " tools on server '" + server.getName() + "' truncate to " + name);
+            }
+            Tool tool = matching.stream().findFirst().orElseThrow(() -> new AccessDenied("no such tool: " + name));
             if (!server.getAccess().allows(readOnly(tool))) {
                 throw new AccessDenied("needs WRITE on server '" + server.getName() + "' (has " + server.getAccess() + ")");
             }
@@ -96,9 +106,8 @@ final class McpTools {
         String auth = server.isForwardCallerToken() ? "Bearer " + bearer : server.getAuthHeader();
         URI url = URI.create(server.getUrl());
         String base = url.getScheme() + "://" + url.getRawAuthority();
-        String endpoint = url.getRawPath() == null || url.getRawPath().isEmpty() ? "/" : url.getRawPath();
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base)
-                .endpoint(endpoint)
+                .endpoint(endpoint(url))
                 .connectTimeout(Duration.ofSeconds(5))
                 .httpRequestCustomizer((request, method, uri, body, context) -> {
                     if (auth != null) {
@@ -117,6 +126,12 @@ final class McpTools {
             throw e;
         }
         return client;
+    }
+
+    /** Path and query of the stored URL, as the SDK's endpoint: {@code /mcp?agent=5} must keep its {@code ?agent=5}. */
+    static String endpoint(URI url) {
+        String path = url.getRawPath() == null || url.getRawPath().isEmpty() ? "/" : url.getRawPath();
+        return url.getRawQuery() == null ? path : path + "?" + url.getRawQuery();
     }
 
     /** The one rule READ keys on. A tool that does not say it is read-only is taken to write. */
