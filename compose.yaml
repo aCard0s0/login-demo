@@ -89,8 +89,8 @@ services:
     build:
       context: .
       target: agent-service
-    # Same JVM arithmetic as the other two; this one also carries the Anthropic and MCP clients. Measured,
-    # see the resources section of the README.
+    # Same JVM arithmetic as the other two; this one also carries the MCP server and client. Measured when it
+    # still carried a model SDK too, see the resources section of the README; it has only lost weight since.
     mem_limit: 320m
     cpus: 1.0
     environment:
@@ -100,10 +100,10 @@ services:
       SPRING_DATASOURCE_PASSWORD: agent
       AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
       AUTH_TOKEN_VERSIONS_URI: http://auth-service:9081/internal/token-versions
+      # Where the long-lived token an external agent connects with is minted. Compose-internal, like /internal/token-versions.
+      AUTH_AGENT_TOKENS_URI: http://auth-service:9081/internal/agent-tokens
       # The built-in MCP server every new agent starts with. Compose-internal: the browser never sees it.
       AGENTS_TODO_MCP_URL: http://todo-service:9082/mcp
-      # Optional, from .env. Without it every page works and Run answers 503, rather than the stack not starting.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy

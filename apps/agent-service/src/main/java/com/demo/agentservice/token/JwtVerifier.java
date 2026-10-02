@@ -55,7 +55,9 @@ public class JwtVerifier {
             }
             // A token with no role claim is read as a plain user: least privilege, rather than a 500.
             Object role = claims.getClaim("role");
-            return new Caller(claims.getSubject(), role == null ? "USER" : String.valueOf(role));
+            // An agent token carries the one agent it was minted for; any other token carries none.
+            Long agent = "AGENT".equals(role) ? claims.getLongClaim("agent") : null;
+            return new Caller(claims.getSubject(), role == null ? "USER" : String.valueOf(role), agent);
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid or expired token");
         }

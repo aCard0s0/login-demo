@@ -1,4 +1,4 @@
-package com.demo.agentservice.run;
+package com.demo.agentservice.mcp;
 
 /** What a tool call came back with, for the model. */
 record ToolResult(String text, boolean error) {

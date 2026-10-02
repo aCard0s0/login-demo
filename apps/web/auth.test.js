@@ -67,6 +67,10 @@ test('/api/agents and /api/public/agents reach agent-service, not auth-service',
   assert.equal(seenByAgent.at(-1).url, '/api/agents/7/activity?x=1');
   await fetch(`${base}/api/public/agents/stats`);
   assert.equal(seenByAgent.at(-1).url, '/api/public/agents/stats');
+  // The MCP endpoint an external agent connects to: the query string names the agent and must survive.
+  await fetch(`${base}/mcp?agent=7`, { method: 'POST', body: '{}' });
+  assert.equal(seenByAgent.at(-1).method, 'POST');
+  assert.equal(seenByAgent.at(-1).url, '/mcp?agent=7');
   assert.equal(seen.length, before, 'auth-service saw none of it');
 });
 

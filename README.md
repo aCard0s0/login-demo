@@ -1,8 +1,9 @@
 # login-demo
 
 Multi-module Maven project: three Spring Boot services plus a dependency-free Node frontend. Accounts and
-logins in one service, todos in another, user-owned AI agents with permissioned MCP servers in a third, and
-an RS256 token handoff between them instead of a per-request call.
+logins in one service, todos in another, user-owned agents -- each an MCP server with permissioned tools that
+Claude Code or any MCP client connects to -- in a third, and an RS256 token handoff between them instead of a
+per-request call.
 
 ```
 login-demo              the one script that runs this repo
@@ -10,11 +11,11 @@ pom.xml                 parent (packaging: pom)
 compose.yaml            db + the four services
 Dockerfile              one file, one build, four runtime stages
 docker/initdb.sql       one database and one role per service
-.env.example            the admin credentials, OAuth client secrets and Anthropic key compose reads from .env
+.env.example            the admin credentials and OAuth client secrets compose reads from .env
 apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
 apps/todo-service       per-account todos, and their MCP server  :9082
 apps/agent-service      agents, their MCP servers, permissions   :9083
-apps/web                static pages + /api proxy               :3000
+apps/web                static pages + /api and /mcp proxy      :3000
 ```
 
 Each service documents itself:
@@ -22,8 +23,8 @@ Each service documents itself:
 | | What it owns | README |
 |---|---|---|
 | auth-service | accounts, passwords, roles, OAuth sign-in, the signing key | [apps/auth-service](apps/auth-service/README.md) |
-| todo-service | todos, verifying tokens locally, and the `/mcp` server an agent uses | [apps/todo-service](apps/todo-service/README.md) |
-| agent-service | agents, the MCP servers each may use, READ/WRITE enforced per tool call | [apps/agent-service](apps/agent-service/README.md) |
+| todo-service | todos, verifying tokens locally, and the `/mcp` server agents reach them through | [apps/todo-service](apps/todo-service/README.md) |
+| agent-service | agents as MCP servers: the servers each may use, READ/WRITE enforced per tool call | [apps/agent-service](apps/agent-service/README.md) |
 | web | the pages and the one-origin proxy | [apps/web](apps/web/README.md) |
 
 ## Package convention
@@ -132,8 +133,9 @@ Four of them, on the account row and carried in the token: `ADMIN`, `MODERATOR`,
 | **AGENT** | yes | yes | no | no | no |
 | **USER** | yes | yes | no | no | no |
 
-`AGENT` is reserved and currently behaves exactly like `USER`; nothing grants it. The agents on `/agents` are
-not accounts and do not use it: they run as their owner, see [Agents](#agents).
+`AGENT` behaves exactly like `USER` and is never on an account row: it is the role stamped on the long-lived
+token minted for one of a user's agents, with the owner as subject, so a connecting agent acts as its owner
+and nothing more. See [Agents](#agents).
 
 Endpoint by endpoint:
 
@@ -196,21 +198,30 @@ Details, including why it is not in `docker/initdb.sql`, are in the
 
 ## Agents
 
-From `/agents`, any user creates as many **agents** as they like. An agent is a name, a system prompt, a list
-of **MCP servers** each marked **READ** or **WRITE**, and one setting for how far it may reach into the
-owner's *other* agents. **Run** asks Claude (`ANTHROPIC_API_KEY` in `.env`; optional, Run answers 503 without
-it) with exactly the tools those permissions allow.
+From `/agents`, any user creates as many **agents** as they like. An agent is a name, instructions, a list of
+**MCP servers** each marked **READ** or **WRITE**, and one setting for how far it may reach into the owner's
+*other* agents. No model runs in this stack: each agent **is an MCP server**, at `/mcp?agent=<id>`, and
+Claude Code, Cursor or any MCP client connects to it and gets exactly the tools those permissions allow.
 
-The permission is the service's, not the prompt's. **READ** offers the model only the tools a server
+```bash
+claude mcp add --transport http todos "http://localhost:3000/mcp?agent=<id>" --header "Authorization: Bearer <token>"
+```
+
+The token is either the owner's own login token (30 minutes) or one made with **Create token** on the
+agent's page: minted by auth-service with role `AGENT`, the owner as subject and the agent pinned by claim,
+good for 30 days, shown once, and killed with the owner's other tokens by **Revoke access**.
+Step by step, for Claude Code, Cursor, VS Code and plain curl: [docs/connect-an-agent.md](docs/connect-an-agent.md).
+
+The permission is the service's, not the connecting agent's. **READ** offers only the tools a server
 annotates `readOnlyHint: true` and refuses any other; **WRITE** offers them all. Every tool call is checked
 again by agent-service against the row as it is saved *at that moment*, so flipping a server from WRITE to
-READ on the page while a run is going is obeyed from the next call. What ran and what was refused is in the
-agent's activity log on the same page.
+READ on the page while an agent is connected is obeyed from its next call. What ran and what was refused is in
+the agent's activity log on the same page.
 
 Every new agent starts with the built-in **todos** server as READ: todo-service exposes its todos over MCP at
-`/mcp`, with `list_todos` read-only and `add_todo`, `update_todo`, `delete_todo` not. The agent runs **as its
-owner** -- the owner's own token is forwarded to that server -- so it can only ever see the owner's todos.
-Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header.
+`/mcp`, with `list_todos` read-only and `add_todo`, `update_todo`, `delete_todo` not. The agent acts **as its
+owner** -- the token it connected with is forwarded to that server -- so it can only ever see the owner's
+todos. Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header.
 
 An agent reads or changes the owner's other agents only when its **other agents** setting says READ or WRITE,
 through built-in tools scoped to the same owner; it can never change its own setup. Details, the activity
@@ -281,7 +292,8 @@ The consequences worth knowing:
 | agent | GET · PATCH · DELETE | `/api/agents/{id}` | yes -- owner only |
 | agent | POST | `/api/agents/{id}/servers` · `PATCH`/`DELETE .../servers/{sid}` | yes -- owner only |
 | agent | GET | `/api/agents/{id}/activity` | yes -- owner only |
-| agent | POST | `/api/agents/{id}/run` | yes -- owner only; 503 without an API key |
+| agent | POST | `/api/agents/{id}/token` | yes -- owner only; a 30-day token for connecting as this agent |
+| agent | POST | `/mcp?agent={id}` | yes -- MCP; owner's token or the agent's own; proxied |
 | agent | GET | `/api/public/agents/stats` | no |
 
 Request and response bodies are in each service's README:
@@ -292,13 +304,14 @@ The token travels in the `Authorization: Bearer <token>` header rather than a qu
 out of access logs and Referer headers. Rejected input comes back as `{"error": "..."}` from both services,
 which is what the pages render.
 
-The Node server proxies `/api/agents*` and `/api/public/agents*` to agent-service, `/api/todos*` and
-`/api/public/todos*` to todo-service and the rest of `/api/*` to auth-service, so the browser stays on one
-origin and no service needs CORS config.
+The Node server proxies `/mcp`, `/api/agents*` and `/api/public/agents*` to agent-service, `/api/todos*`
+and `/api/public/todos*` to todo-service and the rest of `/api/*` to auth-service, so the browser stays on
+one origin, no service needs CORS config, and an external agent reaches `/mcp` through the same port.
 
 Ports 9081/9082/9083 rather than 8081/8082/8083: Docker holds those on this machine. Override with
 `server.port`, and point the frontend elsewhere with `AUTH_URL` / `TODO_URL` / `AGENT_URL`. todo-service and
 agent-service find the signing key through `auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations
 through `auth.token-versions-uri` (`AUTH_TOKEN_VERSIONS_URI`); agent-service finds the built-in todo MCP
-server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`); and all three services take
+server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`) and the token minter through
+`auth.agent-tokens-uri` (`AUTH_AGENT_TOKENS_URI`); and all three services take
 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` from the environment.

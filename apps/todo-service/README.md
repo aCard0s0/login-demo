@@ -85,8 +85,9 @@ so the owner rules above apply to an agent exactly as they do to the browser:
 | `update_todo {id, title?, done?}` | | `PATCH /api/todos/{id}` |
 | `delete_todo {id}` | | `DELETE /api/todos/{id}` |
 
-Who is asking comes from the `Authorization` header on the MCP request -- agent-service forwards the token of
-the user who started the agent -- and is checked by the same `JwtVerifier`. No or a bad token makes every
+Who is asking comes from the `Authorization` header on the MCP request -- agent-service forwards the token
+the external agent connected with, the owner's own or an agent token minted for them with the owner as
+subject -- and is checked by the same `JwtVerifier`. No or a bad token makes every
 tool answer an error result rather than a list.
 
 The annotation column is the point: agent-service's **READ** permission offers an agent only the tools a

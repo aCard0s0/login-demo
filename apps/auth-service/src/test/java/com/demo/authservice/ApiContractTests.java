@@ -255,4 +255,38 @@ class ApiContractTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$['" + hedyId + "']").value(2));
     }
+
+    /** The token agent-service hands an external agent: the owner as subject, AGENT as role, the agent pinned by claim. */
+    @Test
+    void anAgentTokenNamesTheOwnerAndOneAgentAndDiesWithTheOwnersTokens() throws Exception {
+        String ada = register("Ada", "ada-agent@example.com", "lovelace-1815");
+        long adaId = idOf(ada);
+
+        String body = mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isString())
+                .andReturn().getResponse().getContentAsString();
+        String token = body.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+        com.nimbusds.jwt.JWTClaimsSet claims = com.nimbusds.jwt.SignedJWT.parse(token).getJWTClaimsSet();
+        assertEquals(String.valueOf(adaId), claims.getSubject());
+        assertEquals("AGENT", claims.getStringClaim("role"));
+        assertEquals(42L, claims.getLongClaim("agent"));
+        long days = java.time.Duration.between(java.time.Instant.now(), claims.getExpirationTime().toInstant()).toDays();
+        assertEquals(29, days, "30 days, minus the seconds this test took");
+
+        // It is a token like any other: /api/accounts/me answers it, and a revoke kills it.
+        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(adaId));
+        String admin = login("admin@example.com", "admin-pass-01");
+        mvc.perform(post("/api/accounts/" + adaId + "/revoke").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
+        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+
+        mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":999999,\"agentId\":1}"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("account not found"));
+        mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + adaId + "}"))
+                .andExpect(status().isBadRequest());
+    }
 }

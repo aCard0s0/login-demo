@@ -1,7 +1,9 @@
 package com.demo.agentservice.agent;
 
+import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
 import com.demo.agentservice.activity.ActivityResponse;
+import com.demo.agentservice.token.AgentTokens;
 import com.demo.agentservice.token.Caller;
 import com.demo.agentservice.token.JwtVerifier;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Every endpoint here is private: who is asking comes from the caller's token, never from the request body,
@@ -30,11 +33,13 @@ public class AgentController {
     private final AgentService agents;
     private final ActivityLog activity;
     private final JwtVerifier jwt;
+    private final AgentTokens tokens;
 
-    public AgentController(AgentService agents, ActivityLog activity, JwtVerifier jwt) {
+    public AgentController(AgentService agents, ActivityLog activity, JwtVerifier jwt, AgentTokens tokens) {
         this.agents = agents;
         this.activity = activity;
         this.jwt = jwt;
+        this.tokens = tokens;
     }
 
     @GetMapping
@@ -83,6 +88,20 @@ public class AgentController {
     public void removeServer(@RequestHeader(value = "Authorization", required = false) String authz,
                              @PathVariable Long id, @PathVariable Long serverId) {
         agents.removeServer(jwt.callerOf(authz), id, serverId, BY_OWNER);
+    }
+
+    /**
+     * A long-lived token for an external agent to connect to {@code /mcp?agent=<id>} as this agent. Shown once
+     * and never stored; the account's "revoke access" is what kills it early.
+     */
+    @PostMapping("/{id}/token")
+    public Map<String, String> token(@RequestHeader(value = "Authorization", required = false) String authz,
+                                     @PathVariable Long id) {
+        Caller caller = jwt.callerOf(authz);
+        Agent agent = agents.get(caller, id);
+        String token = tokens.issue(caller.accountId(), agent.getId());
+        activity.record(agent.getId(), Activity.CONFIG_CHANGED, "agent token issued");
+        return Map.of("token", token);
     }
 
     /** The agent's history, newest first. Reading it needs owning the agent, like everything else here. */

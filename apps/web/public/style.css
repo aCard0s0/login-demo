@@ -62,7 +62,7 @@ select { font: inherit; padding: .35rem .5rem; }
 .badge.read { color: light-dark(#06c, #8bf); }
 .badge.write { color: light-dark(#a50, #fb6); }
 .badge.none { opacity: .6; }
-.badge.run_started, .badge.run_finished { opacity: .7; }
+.badge.connected { opacity: .7; }
 .badge.tool_call { color: light-dark(#070, #7d7); }
 .badge.tool_denied { color: light-dark(#c00, #f77); }
 .badge.config_changed { color: light-dark(#06c, #8bf); }

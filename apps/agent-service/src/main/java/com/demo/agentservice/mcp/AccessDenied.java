@@ -1,4 +1,4 @@
-package com.demo.agentservice.run;
+package com.demo.agentservice.mcp;
 
 /** A tool call the agent's permissions do not allow. Becomes an error result for the model and a line in the log. */
 public class AccessDenied extends RuntimeException {

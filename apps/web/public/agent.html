@@ -16,7 +16,7 @@
 
     <form id="edit-form">
       <label>Name<input id="name" required maxlength="100"></label>
-      <label>Instructions <small>(its system prompt)</small><textarea id="instructions"></textarea></label>
+      <label>Instructions <small>(what a connecting agent is told on connect)</small><textarea id="instructions"></textarea></label>
       <label>
         Access to your other agents
         <select id="others">
@@ -51,13 +51,17 @@
       </label>
     </form>
 
-    <h2>Run</h2>
-    <form id="run-form">
-      <label><textarea id="prompt" placeholder="What are my open todos?" required></textarea></label>
-      <button id="run">Run</button>
-      <small id="running" hidden>Thinking… the agent may call several tools; this can take a little while.</small>
+    <h2>Connect</h2>
+    <p class="note">
+      This agent is an MCP server. Point Claude Code, Cursor or any MCP client at
+      <code id="mcp-url"></code> with a token in its <code>Authorization</code> header: your own login token
+      works for half an hour; a token made here lasts 30 days and is shown once.
+    </p>
+    <form id="token-form">
+      <button id="token">Create token</button>
+      <small>Revoking access on your account kills every token ever made here.</small>
     </form>
-    <pre class="reply" id="reply"></pre>
+    <pre class="reply" id="connect"></pre>
 
     <h2>Activity</h2>
     <div class="table-wrap">
@@ -71,7 +75,7 @@
     <p class="note">
       <b>READ</b> offers the agent only the tools a server marks read-only; <b>WRITE</b> offers them all.
       Permissions are checked by agent-service on every single tool call, against what is saved right now --
-      change one while a run is going and the next call obeys it. A refused call shows here as
+      change one while an agent is connected and its next call obeys it. A refused call shows here as
       <span class="badge tool_denied">tool_denied</span>.
     </p>
   </main>
@@ -110,7 +114,7 @@ const renderAgent = async () => {
   const a = await api(`/api/agents/${id}`);
   document.title = `${a.name} · login-demo`;
   $('title').textContent = a.name;
-  // Only fill the form when the user is not mid-edit, so a refresh after a run does not eat their typing.
+  // Only fill the form when the user is not mid-edit, so a refresh after a save does not eat their typing.
   if (document.activeElement?.form !== $('edit-form')) {
     $('name').value = a.name;
     $('instructions').value = a.instructions;
@@ -197,18 +201,23 @@ $('server-form').onsubmit = (e) => {
   }, 'Server added.');
 };
 
-$('run-form').onsubmit = (e) => {
+const mcpUrl = `${location.origin}/mcp?agent=${id}`;
+$('mcp-url').textContent = mcpUrl;
+
+// The token is shown once, with the one command that uses it; it is never sent back by the server again.
+$('token-form').onsubmit = (e) => {
   e.preventDefault();
-  $('run').disabled = true;
-  $('running').hidden = false;
-  $('reply').textContent = '';
   act(async () => {
-    const out = await api(`/api/agents/${id}/run`, { method: 'POST', body: JSON.stringify({ prompt: $('prompt').value }) });
-    $('reply').textContent = out.reply || '(no reply)';
-  }, 'Run finished.').finally(() => {
-    $('run').disabled = false;
-    $('running').hidden = true;
-  });
+    const { token } = await api(`/api/agents/${id}/token`, { method: 'POST' });
+    const name = $('name').value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'agent';
+    $('connect').textContent = [
+      `# Claude Code -- copy now, this token is not shown again`,
+      `claude mcp add --transport http ${name} "${mcpUrl}" --header "Authorization: Bearer ${token}"`,
+      ``,
+      `# any other client: POST ${mcpUrl}`,
+      `Authorization: Bearer ${token}`,
+    ].join('\n');
+  }, 'Token created.');
 };
 
 if (requireLogin()) {

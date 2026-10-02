@@ -1,6 +1,6 @@
 # web
 
-Static pages and the `/api` proxy. Port **3000**, and the only container that publishes one.
+Static pages and the `/api` (and `/mcp`) proxy. Port **3000**, and the only container that publishes one.
 
 No framework, no build step, no dependencies: `server.js` is plain Node using only `node:http` and
 `node:fs/promises`, and `package.json` lists no dependencies at all. Nothing here is compiled, bundled or
@@ -15,7 +15,7 @@ minified, so what is in `public/` is what the browser gets.
 | `/todos` | Your todos. Bounces to `/login` without a token. |
 | `/account` | Change your name, email or password. |
 | `/agents` | Your agents: create one, delete one, see each one's servers and access at a glance. |
-| `/agent?id=` | One agent: its prompt, its MCP servers and their READ/WRITE, access to your other agents, a Run box, and its activity. |
+| `/agent?id=` | One agent: its instructions, its MCP servers and their READ/WRITE, access to your other agents, how to connect to it, and its activity. |
 | `/admin` | Admin only: accounts, suspend and revoke. |
 
 ```
@@ -48,21 +48,23 @@ password does.
 
 ## The proxy
 
-`/api/agents*` and `/api/public/agents*` go to agent-service, `/api/todos*` and `/api/public/todos*` to
-todo-service, and the rest of `/api/*` to auth-service. Method,
+`/mcp`, `/api/agents*` and `/api/public/agents*` go to agent-service, `/api/todos*` and `/api/public/todos*`
+to todo-service, and the rest of `/api/*` to auth-service. Method,
 path, headers and body are passed through untouched, so PATCH, the `Authorization` header, the OAuth state
 cookie and the 302s of the provider flow all need nothing special.
 
 The point is that the browser stays on one origin: no service needs CORS configuration, and none has to
-publish a port. An upstream that is down answers 502 rather than hanging. A run (`POST /api/agents/{id}/run`)
-can take a while; nothing here times it out, and the page disables its Run button until the reply lands.
+publish a port. An upstream that is down answers 502 rather than hanging. `/mcp` is the one path outside
+`/api` that is forwarded: it is where an external agent connects, with the query string naming the agent.
 
 ## Agents in the UI
 
 `/agents` and `/agent` talk to agent-service only. The detail page edits everything in place -- a server's
-access `<select>` saves on change, so flipping READ to WRITE while a run is going is a one-click way to watch
-the next tool call obey it -- and refreshes the activity table after every save and run. A stored
-authorization header shows only as *header set*; the value is never sent back.
+access `<select>` saves on change, so flipping READ to WRITE while an agent is connected is a one-click way to
+watch its next tool call obey it -- and refreshes the activity table after every save. **Create token** asks
+agent-service for a 30-day agent token and shows it once, inside a ready `claude mcp add` line; it is not
+stored anywhere in the browser. A stored authorization header shows only as *header set*; the value is never
+sent back.
 
 ## Roles in the UI
 

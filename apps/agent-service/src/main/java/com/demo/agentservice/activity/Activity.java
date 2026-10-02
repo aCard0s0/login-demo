@@ -13,8 +13,8 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 /**
- * One line of an agent's history: a run starting or ending, a tool it called, a tool it was refused, or a
- * change to its configuration. Plain text, so the page can show it as it is.
+ * One line of an agent's history: an external agent connecting as it, a tool it called, a tool it was refused,
+ * or a change to its configuration. Plain text, so the page can show it as it is.
  *
  * <p>A column rather than a foreign key to the agent: the log is read far more than it is joined, and it is
  * deleted with its agent by {@link ActivityLog#deleteFor}.
@@ -25,10 +25,9 @@ import java.time.Instant;
 @NoArgsConstructor
 public class Activity {
 
-    public static final String RUN_STARTED = "run_started";
+    public static final String CONNECTED = "connected";
     public static final String TOOL_CALL = "tool_call";
     public static final String TOOL_DENIED = "tool_denied";
-    public static final String RUN_FINISHED = "run_finished";
     public static final String CONFIG_CHANGED = "config_changed";
 
     static final int MAX_DETAIL = 2000;

@@ -30,7 +30,6 @@
         <nimbus-jose-jwt.version>10.5</nimbus-jose-jwt.version>
         <!-- The 2.x line is the Jackson 3 one, matching Spring Boot 4; 0.x is Jackson 2. -->
         <mcp-bom.version>2.0.0</mcp-bom.version>
-        <anthropic-java.version>2.34.0</anthropic-java.version>
     </properties>
 
     <dependencyManagement>

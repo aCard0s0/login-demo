@@ -1,8 +1,5 @@
-package com.demo.agentservice.run;
+package com.demo.agentservice.mcp;
 
-import com.anthropic.core.JsonValue;
-import com.anthropic.models.messages.Tool;
-import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
 import com.demo.agentservice.agent.Access;
 import com.demo.agentservice.agent.Agent;
@@ -13,6 +10,8 @@ import com.demo.agentservice.agent.OthersAccess;
 import com.demo.agentservice.agent.UpdateAgent;
 import com.demo.agentservice.agent.UpdateMcpServer;
 import com.demo.agentservice.token.Caller;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
+import io.modelcontextprotocol.spec.McpSchema.ToolAnnotations;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
@@ -23,7 +22,7 @@ import java.util.stream.Collectors;
 /**
  * What one agent may do to its owner's <em>other</em> agents, as tools. Three read, four write, gated by the
  * agent's {@code othersAccess} -- read again from the database on every call, so the owner's change bites
- * mid-run like it does for MCP servers.
+ * between two calls like it does for MCP servers.
  *
  * <p>Every tool goes through {@link AgentService} as the owner, so the owner rules are the same ones the REST
  * API enforces and another account's agent is "not found" here too. An agent may never change its own
@@ -55,7 +54,7 @@ class AgentTools {
             defs.add(def("list_agents", "List the owner's other agents: id, name, access to other agents, number of MCP servers.", Map.of(), List.of()));
             defs.add(def("get_agent", "An agent's name, instructions, access to other agents and MCP servers (id, name, url, access).",
                     Map.of("id", integer()), List.of("id")));
-            defs.add(def("get_agent_activity", "An agent's recent history: runs, tool calls, refusals and configuration changes, newest first.",
+            defs.add(def("get_agent_activity", "An agent's recent history: connections, tool calls, refusals and configuration changes, newest first.",
                     Map.of("id", integer()), List.of("id")));
         }
         if (access.writes()) {
@@ -134,11 +133,11 @@ class AgentTools {
         return out.toString();
     }
 
+    /** Reading tools say so in their annotation, like the built-in todo server's listing does. */
     private static Tool def(String name, String description, Map<String, Object> properties, List<String> required) {
-        Tool.InputSchema.Properties.Builder props = Tool.InputSchema.Properties.builder();
-        properties.forEach((k, v) -> props.putAdditionalProperty(k, JsonValue.from(v)));
         return Tool.builder().name(name).description(description)
-                .inputSchema(Tool.InputSchema.builder().properties(props.build()).required(required).build())
+                .inputSchema(Map.of("type", "object", "properties", properties, "required", required))
+                .annotations(ToolAnnotations.builder().readOnlyHint(READ_TOOLS.contains(name)).build())
                 .build();
     }
 

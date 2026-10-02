@@ -4,9 +4,11 @@ import com.demo.authservice.support.AttemptWindow;
 import com.demo.authservice.support.TooManyAttemptsException;
 import com.demo.authservice.token.Tokens;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -128,6 +130,20 @@ public class AccountService {
     public String issue(Account account) {
         return tokens.issue(account.getId(), account.getEmail(), account.getName(), account.getRole().name(),
                 account.getTokenVersion());
+    }
+
+    /**
+     * A long-lived token one of the account's agents connects to agent-service with. agent-service asks for it
+     * on the owner's behalf over the compose network; the token names the owner and the one agent, and dies
+     * with the owner's other tokens on revoke or suspend.
+     */
+    public String issueAgentToken(Long accountId, Long agentId) {
+        if (agentId == null) {
+            throw new IllegalArgumentException("agentId is required");
+        }
+        Account account = accounts.findById(accountId == null ? -1 : accountId).filter(a -> !a.isSuspended())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "account not found"));
+        return tokens.issueForAgent(account.getId(), account.getEmail(), account.getName(), account.getTokenVersion(), agentId);
     }
 
     /** How many accounts exist. Public: a count gives away nothing about who they are. */

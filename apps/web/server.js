@@ -43,9 +43,9 @@ createServer(async (req, res) => {
   // Routed and forwarded as the URL parser resolves it, dot segments (encoded ones too) already collapsed, so
   // /api/../internal cannot ride through as /api and be resolved upstream to a path never meant to be public.
   const { pathname: path, search } = new URL(req.url, 'http://web');
-  // Agents and their public count live in agent-service, the private todos and the public todo count in
-  // todo-service; everything else is auth-service.
-  if (path.startsWith('/api/agents') || path.startsWith('/api/public/agents')) return proxy(req, res, AGENT, path + search);
+  // Agents, their public count and the MCP endpoint an external agent connects to live in agent-service, the
+  // private todos and the public todo count in todo-service; everything else is auth-service.
+  if (path === '/mcp' || path.startsWith('/api/agents') || path.startsWith('/api/public/agents')) return proxy(req, res, AGENT, path + search);
   if (path.startsWith('/api/todos') || path.startsWith('/api/public/todos')) return proxy(req, res, TODO, path + search);
   if (path.startsWith('/api/')) return proxy(req, res, AUTH, path + search);
 

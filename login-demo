@@ -345,12 +345,29 @@ cmd_verify() {
     die "agent-service served a list with no token at all" 1
   fi
 
-  say "ok — auth-service signed a JWT, todo-service and agent-service verified it locally, the round trip came back"
+  step "connecting to the agent over MCP"
+  local atoken tools
+  atoken=$(curl -fsS -X POST "$base/api/agents/$id/token" -H "Authorization: Bearer $token" \
+    | sed -E 's/.*"token":"([^"]+)".*/\1/') || die "agent-service could not get a token from auth-service" 1
+  case "$atoken" in *.*.*) ;; *) die "the agent token did not come back as a three-part JWT: $atoken" 1 ;; esac
+  # The point of the whole design: an MCP client with the agent's token sees the one read-only todo tool and no other.
+  tools=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" \
+    -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}') || die "the MCP endpoint refused the agent token" 1
+  case "$tools" in *'"name":"todos__list_todos"'*) ;; *) die "tools/list did not offer todos__list_todos: $tools" 1 ;; esac
+  case "$tools" in *'todos__add_todo'*) die "a READ agent was offered a writing tool: $tools" 1 ;; esac
+  if curl -fsS -o /dev/null -X POST "$base/mcp?agent=$id" -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' 2>/dev/null \
+    | grep -q '"tools"'; then
+    die "the MCP endpoint listed tools with no token at all" 1
+  fi
+
+  say "ok — auth-service signed a JWT, todo-service and agent-service verified it locally, an MCP client saw only what READ allows"
   note "this left an account, a todo and an agent behind: $email"
-  note "running an agent needs ANTHROPIC_API_KEY and is not part of verify; use Run on /agent"
+  note "connect your own agent: open /agent?id=$id, Create token, paste the claude mcp add line"
 }
 cmd_verify_help() { say "  Needs a running stack. It writes: one account, one todo and one agent, all real, all"
-                    say "  left behind. \`$PROG db reset\` is how you clear them out. It never calls the model."; }
+                    say "  left behind. \`$PROG db reset\` is how you clear them out. No model is involved."; }
 cmd_doctor() {
   no_args "$@"
   local missing=0 broken=0

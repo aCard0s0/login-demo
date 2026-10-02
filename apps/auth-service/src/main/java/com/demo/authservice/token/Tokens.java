@@ -9,6 +9,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -39,8 +40,18 @@ public class Tokens {
 
     private final Duration ttl;
 
-    public Tokens(@Value("${auth.token-ttl:30m}") Duration ttl) throws Exception {
+    private final Duration agentTtl;
+
+    /** Login tokens of the given life, agent tokens of the default 30 days. */
+    public Tokens(Duration ttl) throws Exception {
+        this(ttl, Duration.ofDays(30));
+    }
+
+    @Autowired
+    public Tokens(@Value("${auth.token-ttl:30m}") Duration ttl,
+                  @Value("${auth.agent-token-ttl:30d}") Duration agentTtl) throws Exception {
         this.ttl = ttl;
+        this.agentTtl = agentTtl;
         this.key = new RSAKeyGenerator(2048).keyID(UUID.randomUUID().toString()).generate();
         this.verifier = new RSASSAVerifier(key.toPublicJWK());
     }
@@ -53,18 +64,31 @@ public class Tokens {
      * plain string: it is what lets todo-service decide what a caller may touch without asking us.
      */
     public String issue(Long accountId, String email, String name, String role, int version) {
+        return issue(accountId, email, name, role, version, Map.of(), ttl);
+    }
+
+    /**
+     * A long-lived token for one of the account's agents to connect to agent-service with: the account as
+     * subject, the {@code AGENT} role, and the agent's id as a claim so agent-service can pin it to that one
+     * agent. It carries the account's current token version like any other, so "revoke access" kills it too.
+     */
+    public String issueForAgent(Long accountId, String email, String name, int version, Long agentId) {
+        return issue(accountId, email, name, "AGENT", version, Map.of("agent", agentId), agentTtl);
+    }
+
+    private String issue(Long accountId, String email, String name, String role, int version,
+                         Map<String, Object> extra, Duration lifetime) {
         Instant now = Instant.now();
-        SignedJWT jwt = new SignedJWT(
-                new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(),
-                new JWTClaimsSet.Builder()
-                        .subject(String.valueOf(accountId))
-                        .claim("email", email)
-                        .claim("name", name)
-                        .claim("role", role)
-                        .claim("ver", version)
-                        .issueTime(Date.from(now))
-                        .expirationTime(Date.from(now.plus(ttl)))
-                        .build());
+        JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
+                .subject(String.valueOf(accountId))
+                .claim("email", email)
+                .claim("name", name)
+                .claim("role", role)
+                .claim("ver", version)
+                .issueTime(Date.from(now))
+                .expirationTime(Date.from(now.plus(lifetime)));
+        extra.forEach(claims::claim);
+        SignedJWT jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(), claims.build());
         try {
             jwt.sign(new RSASSASigner(key));
         } catch (Exception e) {
