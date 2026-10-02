@@ -7,3 +7,4 @@ node_modules/
 
 # Real credentials for the local stack. .env.example is the committed stand-in.
 .env
+/compose.override.yaml
