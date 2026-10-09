@@ -1,20 +1,21 @@
 # login-demo
 
-Multi-module Maven project: three Spring Boot services plus a dependency-free Node frontend. Accounts and
+Multi-module Maven project: four Spring Boot services plus a dependency-free Node frontend. Accounts and
 logins in one service, todos in another, user-owned agents -- each an MCP server with permissioned tools that
-Claude Code or any MCP client connects to -- in a third, and an RS256 token handoff between them instead of a
-per-request call.
+Claude Code or any MCP client connects to -- in a third, money accounts that users and their agents move funds
+between in a fourth, and an RS256 token handoff between them instead of a per-request call.
 
 ```
 login-demo              the one script that runs this repo
 pom.xml                 parent (packaging: pom)
-compose.yaml            db + the four services
-Dockerfile              one file, one build, four runtime stages
+compose.yaml            db + the five services
+Dockerfile              one file, one build, five runtime stages
 docker/initdb.sql       one database and one role per service
 .env.example            the admin credentials and OAuth client secrets compose reads from .env
 apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
 apps/todo-service       per-account todos, and their MCP server  :9082
 apps/agent-service      agents, their MCP servers, permissions   :9083
+apps/account-service    money accounts, transfers, agent grants  :9084
 apps/web                static pages + /api and /mcp proxy      :3000
 ```
 
@@ -25,6 +26,7 @@ Each service documents itself:
 | auth-service | accounts, passwords, roles, OAuth sign-in, the signing key | [apps/auth-service](apps/auth-service/README.md) |
 | todo-service | todos, verifying tokens locally, and the `/mcp` server agents reach them through | [apps/todo-service](apps/todo-service/README.md) |
 | agent-service | agents as MCP servers: the servers each may use, READ/WRITE enforced per tool call | [apps/agent-service](apps/agent-service/README.md) |
+| account-service | money accounts for users and their agents, transfers, READ/WRITE grants per agent, and its `/mcp` | [apps/account-service](apps/account-service/README.md) |
 | web | the pages and the one-origin proxy | [apps/web](apps/web/README.md) |
 
 ## Package convention
@@ -49,7 +51,7 @@ cp .env.example .env      # then change the admin password
 ./login-demo start
 ```
 
-Open http://localhost:3000. Five containers: `db`, `auth-service`, `todo-service`, `agent-service`, `web`.
+Open http://localhost:3000. Six containers: `db`, `auth-service`, `todo-service`, `agent-service`, `account-service`, `web`.
 
 `./login-demo` with no arguments prints every command it has; `./login-demo <command> --help` explains one.
 The ones worth knowing: `dev` runs the stack in the foreground, `status` and `logs` say what it is doing,
@@ -71,20 +73,26 @@ docker compose up -d db
 java -jar apps/auth-service/target/auth-service-0.0.1-SNAPSHOT.jar &
 java -jar apps/todo-service/target/todo-service-0.0.1-SNAPSHOT.jar &
 java -jar apps/agent-service/target/agent-service-0.0.1-SNAPSHOT.jar &
+java -jar apps/account-service/target/account-service-0.0.1-SNAPSHOT.jar &
 node apps/web/server.js
 ```
 
 ### Databases
 
-Postgres, with a database and a role per service (`auth`/`auth`, `todo`/`todo`, `agent`/`agent`, created by
-`docker/initdb.sql`), so no service can read another's tables even by accident. The credentials are
+Postgres, with a database and a role per service (`auth`/`auth`, `todo`/`todo`, `agent`/`agent`,
+`account`/`account`, created by `docker/initdb.sql`), so no service can read another's tables even by accident. The credentials are
 development values and the `db` container publishes no port; change them before this goes anywhere real.
 
-`docker/initdb.sql` runs only when the volume is created. A stack that predates agent-service has no `agent`
-database, so either start over with `./login-demo db reset` or add it to the volume you have:
+`docker/initdb.sql` runs only when the volume is created. A stack that predates agent-service or
+account-service lacks their databases, so either start over with `./login-demo db reset` or add them to the
+volume you have:
 
 ```bash
 ./login-demo exec db psql -U postgres -c "CREATE USER agent WITH PASSWORD 'agent';" -c "CREATE DATABASE agent OWNER agent;"
+```
+
+```bash
+./login-demo exec db psql -U postgres -c "CREATE USER account WITH PASSWORD 'account';" -c "CREATE DATABASE account OWNER account;"
 ```
 
 Tests are the exception: they run against a throwaway SQLite file so `./mvnw test` needs nothing installed
@@ -101,6 +109,7 @@ measured idle after `verify`:
 | auth-service | 288m | ~205 MiB (71%) | 1.0 |
 | todo-service | 288m | ~206 MiB (71%) | 1.0 |
 | agent-service | 320m | ~217 MiB (68%) | 1.0 |
+| account-service | 288m | not yet measured | 1.0 |
 | db | 192m | ~68 MiB (35%) | 0.5 |
 | web | 64m | ~18 MiB (27%) | 0.5 |
 
@@ -149,6 +158,9 @@ Endpoint by endpoint:
 | todo | `POST /api/todos` | own | own | own | own |
 | todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | own | own |
 | agent | everything under `/api/agents` | own | own | own | own |
+| account | `GET /api/bank/accounts` · `GET .../{id}` · `GET .../{id}/transfers` | everyone's | everyone's | its own + granted | own + its agents' |
+| account | `POST /api/bank/accounts/{id}/transfers` | anyone's | own, else 404 | its own + WRITE grants | own + its agents' |
+| account | `POST /api/bank/accounts` · `.../deposit` · `PUT`/`DELETE .../permissions/{agentId}` | anyone's | own, else 404 | 403 | own + its agents' |
 
 A todo -- or an agent -- belonging to someone else comes back **404, not 403**, so neither answer says whether
 it exists. Agents are the one thing no role sees across accounts, an admin included.
@@ -295,23 +307,31 @@ The consequences worth knowing:
 | agent | POST | `/api/agents/{id}/token` | yes -- owner only; a 30-day token for connecting as this agent |
 | agent | POST | `/mcp?agent={id}` | yes -- MCP; owner's token or the agent's own; proxied |
 | agent | GET | `/api/public/agents/stats` | no |
+| account | GET · POST | `/api/bank/accounts` | yes |
+| account | GET | `/api/bank/accounts/{id}` · `/api/bank/accounts/{id}/transfers` | yes |
+| account | POST | `/api/bank/accounts/{id}/deposit` | yes -- owner or admin, never an agent token |
+| account | POST | `/api/bank/accounts/{id}/transfers` | yes -- owner, or an agent that owns or was granted WRITE |
+| account | PUT · DELETE | `/api/bank/accounts/{id}/permissions/{agentId}` | yes -- owner or admin |
+| account | POST | `/mcp` | yes -- MCP, agent tokens only, compose network only, never proxied |
+| account | GET | `/api/public/bank/stats` | no |
 
 Request and response bodies are in each service's README:
 [auth-service](apps/auth-service/README.md#endpoints), [todo-service](apps/todo-service/README.md#endpoints),
-[agent-service](apps/agent-service/README.md#endpoints).
+[agent-service](apps/agent-service/README.md#endpoints), [account-service](apps/account-service/README.md#endpoints).
 
 The token travels in the `Authorization: Bearer <token>` header rather than a query parameter so it stays
 out of access logs and Referer headers. Rejected input comes back as `{"error": "..."}` from both services,
 which is what the pages render.
 
-The Node server proxies `/mcp`, `/api/agents*` and `/api/public/agents*` to agent-service, `/api/todos*`
-and `/api/public/todos*` to todo-service and the rest of `/api/*` to auth-service, so the browser stays on
+The Node server proxies `/mcp`, `/api/agents*` and `/api/public/agents*` to agent-service, `/api/bank*` and
+`/api/public/bank*` to account-service, `/api/todos*` and `/api/public/todos*` to todo-service and the rest of
+`/api/*` to auth-service, so the browser stays on
 one origin, no service needs CORS config, and an external agent reaches `/mcp` through the same port.
 
-Ports 9081/9082/9083 rather than 8081/8082/8083: Docker holds those on this machine. Override with
-`server.port`, and point the frontend elsewhere with `AUTH_URL` / `TODO_URL` / `AGENT_URL`. todo-service and
-agent-service find the signing key through `auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations
+Ports 9081-9084 rather than 8081-8084: Docker holds those on this machine. Override with `server.port`, and
+point the frontend elsewhere with `AUTH_URL` / `TODO_URL` / `AGENT_URL` / `ACCOUNT_URL`. todo-service,
+agent-service and account-service find the signing key through `auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations
 through `auth.token-versions-uri` (`AUTH_TOKEN_VERSIONS_URI`); agent-service finds the built-in todo MCP
 server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`) and the token minter through
-`auth.agent-tokens-uri` (`AUTH_AGENT_TOKENS_URI`); and all three services take
+`auth.agent-tokens-uri` (`AUTH_AGENT_TOKENS_URI`); and all four services take
 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` from the environment.

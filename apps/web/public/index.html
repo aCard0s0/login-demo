@@ -21,6 +21,7 @@
     <div class="stats">
       <div><b id="accounts">&middot;&middot;&middot;</b><small>accounts registered</small></div>
       <div><b id="todos">&middot;&middot;&middot;</b><small>todos written</small></div>
+      <div><b id="transfers">&middot;&middot;&middot;</b><small>transfers made</small></div>
     </div>
     <p class="error" id="error"></p>
     <p class="note">
@@ -40,11 +41,12 @@ if (token()) {
   cta.innerHTML = '<a href="/login">Log in or create an account</a>';
 }
 
-// Two services, two counts: neither one can see the other's database, and one being down hides only its own.
-const [accounts, todos] = await Promise.allSettled([api('/api/public/stats'), api('/api/public/todos/stats')]);
+// One count per service: neither one can see the other's database, and one being down hides only its own.
+const [accounts, todos, bank] = await Promise.allSettled([api('/api/public/stats'), api('/api/public/todos/stats'), api('/api/public/bank/stats')]);
 if (accounts.status === 'fulfilled') $('accounts').textContent = accounts.value.accounts;
 if (todos.status === 'fulfilled') $('todos').textContent = todos.value.todos;
-const down = [accounts, todos].find((r) => r.status === 'rejected');
+if (bank.status === 'fulfilled') $('transfers').textContent = bank.value.transfers;
+const down = [accounts, todos, bank].find((r) => r.status === 'rejected');
 if (down) $('error').textContent = `Could not reach a service: ${down.reason.message}`;
 </script>
 </body>

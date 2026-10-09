@@ -25,25 +25,34 @@ const agent = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'application/json' }).end('[]');
 });
 
+// And a stand-in account-service.
+const seenByBank = [];
+const bank = createServer((req, res) => {
+  seenByBank.push({ method: req.method, url: req.url });
+  res.writeHead(200, { 'content-type': 'application/json' }).end('[]');
+});
+
 let web, base;
 before(async () => {
   auth.listen(0);
   await once(auth, 'listening');
   agent.listen(0);
   await once(agent, 'listening');
+  bank.listen(0);
+  await once(bank, 'listening');
   const free = createServer().listen(0);
   await once(free, 'listening');
   const port = free.address().port;
   free.close();
   web = spawn(process.execPath, ['server.js'], {
     cwd: import.meta.dirname,
-    env: { ...process.env, PORT: port, AUTH_URL: `http://localhost:${auth.address().port}`, AGENT_URL: `http://localhost:${agent.address().port}` },
+    env: { ...process.env, PORT: port, AUTH_URL: `http://localhost:${auth.address().port}`, AGENT_URL: `http://localhost:${agent.address().port}`, ACCOUNT_URL: `http://localhost:${bank.address().port}` },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   await once(web.stdout, 'data');
   base = `http://localhost:${port}`;
 });
-after(() => { web.kill(); auth.close(); agent.close(); });
+after(() => { web.kill(); auth.close(); agent.close(); bank.close(); });
 
 test('POST /api/login reaches auth-service with method, body and status intact', async () => {
   const res = await fetch(`${base}/api/login`, { method: 'POST', body: '{"email":"a@b.c","password":"x"}' });
@@ -72,6 +81,18 @@ test('/api/agents and /api/public/agents reach agent-service, not auth-service',
   assert.equal(seenByAgent.at(-1).method, 'POST');
   assert.equal(seenByAgent.at(-1).url, '/mcp?agent=7');
   assert.equal(seen.length, before, 'auth-service saw none of it');
+});
+
+test('/api/bank and /api/public/bank reach account-service; /api/accounts still reaches auth-service', async () => {
+  const before = seen.length;
+  await fetch(`${base}/api/bank/accounts/3/transfers`, { headers: { authorization: 'Bearer t0k' } });
+  assert.equal(seenByBank.at(-1).url, '/api/bank/accounts/3/transfers');
+  await fetch(`${base}/api/public/bank/stats`);
+  assert.equal(seenByBank.at(-1).url, '/api/public/bank/stats');
+  assert.equal(seen.length, before, 'auth-service saw none of it');
+  // The login accounts and the money accounts share a word, not a service.
+  await fetch(`${base}/api/accounts/me`);
+  assert.equal(seen.at(-1).url, '/api/accounts/me');
 });
 
 test('provider start returns the 302 for the browser to follow, not the proxy', async () => {
