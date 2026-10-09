@@ -39,7 +39,8 @@ endpoint, from every agent tool, and from `/mcp`, so neither answer says whether
 An agent acts **as its owner**. An MCP client connects with either the owner's own login token or an **agent
 token**: minted by auth-service on `POST /api/agents/{id}/token`, with the owner as `sub`, role `AGENT`, the
 agent's id in an `agent` claim, and a 30-day life. `/mcp` accepts a token when its subject owns the agent
-and, for an agent token, the claim names that very agent. Whatever token the client connected with is what a
+and, for an agent token, the claim names that very agent -- which also lets an agent token connect to plain
+`/mcp` with no `agent=` parameter; a login token must say which agent it means. Whatever token the client connected with is what a
 server row marked *forward caller token* receives as its `Authorization` header -- which is how the built-in
 todo server knows whose todos to show, and why a READ agent cannot see anybody else's. Agents are not
 accounts; the `AGENT` role lives only on these tokens. It behaves like `USER` at auth-service and todo-service,

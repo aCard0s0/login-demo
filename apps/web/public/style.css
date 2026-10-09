@@ -72,3 +72,6 @@ td.when { white-space: nowrap; font-size: .85rem; opacity: .7; }
 td.detail { word-break: break-word; }
 h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
 .inline { display: inline-flex; gap: .4rem; align-items: center; }
+#connect .inline { display: flex; }
+#connect .inline input, #connect .inline select { flex: 1; width: auto; min-width: 0; }
+#token-value { font-family: ui-monospace, monospace; font-size: .85rem; }

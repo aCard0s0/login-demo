@@ -125,15 +125,24 @@ public class AgentMcpServer {
             return Mono.empty(); // initialized, cancelled, progress: nothing here keeps state to update
         }
 
-        /** The token and agent id on this request, checked: a bad token is 401, an agent not the caller's is "not found". */
+        /**
+         * The token and agent id on this request, checked: a bad token is 401, an agent not the caller's is "not found".
+         * An agent token names its agent in a claim, so with one the {@code agent} parameter may be left off; a login
+         * token has no such claim and needs it.
+         */
         private Session session(McpTransportContext context) {
             String authorization = (String) context.get(AUTHORIZATION);
             Caller caller = jwt.callerOf(authorization);
+            String param = (String) context.get(AGENT);
             Long id;
-            try {
-                id = Long.valueOf((String) context.get(AGENT));
-            } catch (NumberFormatException e) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "which agent? connect to /mcp?agent=<id>");
+            if (param.isBlank() && caller.agentId() != null) {
+                id = caller.agentId();
+            } else {
+                try {
+                    id = Long.valueOf(param);
+                } catch (NumberFormatException e) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "which agent? connect to /mcp?agent=<id>, or use an agent token");
+                }
             }
             // An agent token for another agent gets the same answer as another owner's id: nothing to learn from it.
             if (!caller.mayActAs(id)) {
