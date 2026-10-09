@@ -16,6 +16,7 @@ const PAGES = {
   '/admin': 'admin.html',
   '/agents': 'agents.html',
   '/agent': 'agent.html',
+  '/bank': 'bank.html',
 };
 const ASSETS = {
   '/app.js': ['app.js', 'text/javascript'],

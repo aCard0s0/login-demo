@@ -16,10 +16,11 @@ minified, so what is in `public/` is what the browser gets.
 | `/account` | Change your name, email or password. |
 | `/agents` | Your agents: create one, delete one, see each one's servers and access at a glance. |
 | `/agent?id=` | One agent: its instructions, its MCP servers and their READ/WRITE, access to your other agents, how to connect to it, and its activity. |
+| `/bank` | Your money accounts: open one for yourself or an agent, deposit, transfer, grant an agent READ or WRITE, see an account's history. |
 | `/admin` | Admin only: accounts, suspend and revoke. |
 
 ```
-public/index.html  login.html  todos.html  account.html  agents.html  agent.html  admin.html
+public/index.html  login.html  todos.html  account.html  agents.html  agent.html  bank.html  admin.html
        app.js      token handling, the api() helper, the shared header
        style.css
 server.js          the fixed URL map and the /api proxy
@@ -48,8 +49,9 @@ password does.
 
 ## The proxy
 
-`/mcp`, `/api/agents*` and `/api/public/agents*` go to agent-service, `/api/todos*` and `/api/public/todos*`
-to todo-service, and the rest of `/api/*` to auth-service. Method,
+`/mcp`, `/api/agents*` and `/api/public/agents*` go to agent-service, `/api/bank*` and `/api/public/bank*` to
+account-service, `/api/todos*` and `/api/public/todos*` to todo-service, and the rest of `/api/*` to
+auth-service. Method,
 path, headers and body are passed through untouched, so PATCH, the `Authorization` header, the OAuth state
 cookie and the 302s of the provider flow all need nothing special.
 
@@ -65,6 +67,14 @@ watch its next tool call obey it -- and refreshes the activity table after every
 agent-service for a 30-day agent token and shows it once, inside a ready `claude mcp add` line; it is not
 stored anywhere in the browser. A stored authorization header shows only as *header set*; the value is never
 sent back.
+
+## The bank in the UI
+
+`/bank` talks to account-service for everything and to agent-service once, for the names of your agents, so
+the *For* column and the grant form can say *todo helper* instead of *agent #7*. Amounts are typed in units
+and sent as whole cents; the server never sees a fraction. **History** toggles one account's transfers under
+the forms. Agents never see this page: an agent token is refused by the API for everything but reading and
+transferring, which it does over MCP.
 
 ## Roles in the UI
 
@@ -82,18 +92,19 @@ API-only. See the [root README](../../README.md#roles) for what the roles actual
 | `AUTH_URL` | `http://localhost:9081` |
 | `TODO_URL` | `http://localhost:9082` |
 | `AGENT_URL` | `http://localhost:9083` |
+| `ACCOUNT_URL` | `http://localhost:9084` |
 
 ## Running it alone
 
 ```bash
-node apps/web/server.js     # with the three services already up
+node apps/web/server.js     # with the four services already up
 ```
 
 ## Tests
 
 `auth.test.js` covers the authentication paths only: the proxy leg to auth-service (method, body,
 `Authorization` header and the provider 302 pass through; a dead upstream answers a JSON 502), the routing
-of `/api/agents*` to agent-service, and the 401 rules in `app.js`. Plain `node --test`, no dependencies.
+of `/api/agents*` to agent-service and `/api/bank*` to account-service, and the 401 rules in `app.js`. Plain `node --test`, no dependencies.
 
 ```bash
 npm test --prefix apps/web
