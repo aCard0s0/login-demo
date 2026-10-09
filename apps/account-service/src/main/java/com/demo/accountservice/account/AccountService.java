@@ -86,14 +86,26 @@ public class AccountService {
         if (to == null || !accounts.existsById(to)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such destination account");
         }
-        if (source.getId().equals(to)) {
+        long src = source.getId();
+        if (src == to) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "source and destination are the same account");
         }
-        if (accounts.debit(source.getId(), cents) == 0) {
+        // Both rows are updated in ascending id order, so A->B and B->A racing cannot deadlock on Postgres. A
+        // failed debit rolls back whichever credit ran first.
+        if (src < to) {
+            debitOrFail(src, cents);
+            accounts.credit(to, cents);
+        } else {
+            accounts.credit(to, cents);
+            debitOrFail(src, cents);
+        }
+        return transfers.save(new Transfer(src, to, cents, caller.describe()));
+    }
+
+    private void debitOrFail(long from, long cents) {
+        if (accounts.debit(from, cents) == 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "insufficient funds");
         }
-        accounts.credit(to, cents);
-        return transfers.save(new Transfer(source.getId(), to, cents, caller.describe()));
     }
 
     /** Grants, or changes, what one agent may do with this account. Only the owner (or an admin) may. */
@@ -158,9 +170,15 @@ public class AccountService {
         }
     }
 
+    /** Ten trillion in major units: far above any balance here, far below where a bigint sum could overflow. */
+    static final long MAX_AMOUNT = 1_000_000_000_000_000L;
+
     private static long positive(Long amount) {
         if (amount == null || amount <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount must be a positive number of cents");
+        }
+        if (amount > MAX_AMOUNT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "amount is too large");
         }
         return amount;
     }

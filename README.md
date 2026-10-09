@@ -309,10 +309,10 @@ The consequences worth knowing:
 | agent | GET | `/api/public/agents/stats` | no |
 | account | GET · POST | `/api/bank/accounts` | yes |
 | account | GET | `/api/bank/accounts/{id}` · `/api/bank/accounts/{id}/transfers` | yes |
-| account | POST | `/api/bank/accounts/{id}/deposit` | yes -- owner only, never an agent token |
+| account | POST | `/api/bank/accounts/{id}/deposit` | yes -- owner or admin, never an agent token |
 | account | POST | `/api/bank/accounts/{id}/transfers` | yes -- owner, or an agent that owns or was granted WRITE |
-| account | PUT · DELETE | `/api/bank/accounts/{id}/permissions/{agentId}` | yes -- owner only |
-| account | POST | `/mcp` | yes -- MCP, compose network only, never proxied |
+| account | PUT · DELETE | `/api/bank/accounts/{id}/permissions/{agentId}` | yes -- owner or admin |
+| account | POST | `/mcp` | yes -- MCP, agent tokens only, compose network only, never proxied |
 | account | GET | `/api/public/bank/stats` | no |
 
 Request and response bodies are in each service's README:

@@ -23,12 +23,16 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
             + "or exists (select p from AccountPermission p where p.account = a and p.agentId = :agent) order by a.id asc")
     List<Account> findReachableByAgent(@Param("owner") String owner, @Param("agent") Long agent);
 
-    /** Takes the money only if it is there: zero rows means insufficient funds. One statement, so two transfers cannot both spend the same balance. */
-    @Modifying
+    /**
+     * Takes the money only if it is there: zero rows means insufficient funds. One statement, so two transfers
+     * cannot both spend the same balance. Clears the persistence context afterwards, so an {@link Account} loaded
+     * earlier in the transaction cannot be flushed back with its stale balance.
+     */
+    @Modifying(clearAutomatically = true)
     @Query("update Account a set a.balance = a.balance - :amount where a.id = :id and a.balance >= :amount")
     int debit(@Param("id") Long id, @Param("amount") long amount);
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("update Account a set a.balance = a.balance + :amount where a.id = :id")
     int credit(@Param("id") Long id, @Param("amount") long amount);
 }

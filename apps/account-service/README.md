@@ -53,7 +53,8 @@ source is checked. An account the caller may not see is **404, not 403**, from e
 |---|---|---|---|---|
 | list · get · transfers | everyone's | everyone's | its own + granted | own + its agents' |
 | transfer from | anyone's | own, else 404 | its own + WRITE grants | own + its agents' |
-| open · deposit · grant · revoke | anyone's | own, else 404 | 403 | own + its agents' |
+| deposit · grant · revoke | anyone's | own, else 404 | 403 | own + its agents' |
+| open | own | own | 403 | own |
 
 A transfer is one `UPDATE ... WHERE balance >= amount`: zero rows means insufficient funds, and two
 transfers racing for the same balance cannot both win. Every movement is a `Transfer` row, deposits
@@ -71,17 +72,19 @@ included (with no source), stamped with who asked: `user 3` or `agent 7`.
 | GET | `/api/bank/accounts/{id}/transfers` | | its transfers, newest first |
 | PUT | `/api/bank/accounts/{id}/permissions/{agentId}` | `{"access": "READ"\|"WRITE"}` | the account; creates or changes the grant |
 | DELETE | `/api/bank/accounts/{id}/permissions/{agentId}` | | the account |
-| POST | `/mcp` | MCP | compose network only; see below |
+| POST | `/mcp` | MCP | agent tokens only, compose network only; see below |
 | GET | `/api/public/bank/stats` | | `{"accounts", "transfers"}`, no token |
 
 Account: `{"id", "owner", "agentId", "name", "balance", "permissions": [{"agentId", "access"}]}`.
 Transfer: `{"id", "from", "to", "amount", "by", "at"}`; `from` is null for a deposit.
-Rejections are `{"error": "..."}`.
+Rejections are `{"error": "..."}`, a body that does not parse included.
 
 ## The MCP server
 
-`POST /mcp`, stateless, outside `/api` so the browser never reaches it. Three tools, each the thin face of
-one `AccountService` method, so an agent is held to exactly the rules above:
+`POST /mcp`, stateless, outside `/api` so the browser never reaches it. **Agent tokens only**: agent-service
+forwards whatever token the client connected with, and an owner's login token would hand the agent the
+owner's whole reach, so a login token gets an error result from every tool. Three tools, each the thin face
+of one `AccountService` method, so an agent is held to exactly the rules above:
 
 | tool | `readOnlyHint` | does |
 |---|---|---|
@@ -93,9 +96,12 @@ Opening, depositing and granting are not offered at all. The annotation is what 
 permission keys on, so `transfer` must never carry it.
 
 To let one of your agents use it, add a server to the agent on `/agent?id=<id>`: url
-`http://account-service:9084/mcp`, **forward caller token** on, access READ or WRITE. The agent then
-connects with its own token, account-service sees the `agent` claim, and the agent reaches the accounts
-opened for it plus whatever it was granted -- and only those, whatever the agent-service access says.
+`http://account-service:9084/mcp`, **forward caller token** on, access READ or WRITE. Connect with the
+agent's own token (**Create token** on that page): account-service sees the `agent` claim, and the agent
+reaches the accounts opened for it plus whatever it was granted -- and only those, whatever the
+agent-service access says.
+
+A fractional amount or id (`99.99`, `5.7`) is refused everywhere, REST and MCP, rather than truncated.
 
 ## Tests
 

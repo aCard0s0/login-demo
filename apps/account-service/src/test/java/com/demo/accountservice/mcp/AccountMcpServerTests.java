@@ -27,6 +27,10 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import java.io.OutputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -125,7 +129,38 @@ class AccountMcpServerTests {
             assertEquals("no such account", text(refused));
 
             assertTrue(Boolean.TRUE.equals(client(null).callTool(new CallToolRequest("list_accounts", Map.of())).isError()));
+
+            CallToolResult fraction = bot.callTool(new CallToolRequest("transfer", Map.of("from", bots, "to", mine, "amount", 40.9)));
+            // The SDK's schema check catches it first ("integer expected"); number() is the backstop should that ever relax.
+            assertTrue(Boolean.TRUE.equals(fraction.isError()), "40.9 cents must not quietly become 40");
+            assertEquals(60, bank.get(owner, bots).getBalance());
         }
+    }
+
+    @Test
+    void aLoginTokenIsRefusedByEveryTool() {
+        Caller owner = new Caller("30", "USER");
+        bank.create(owner, new NewAccount("mine", null));
+        // agent-service forwards whatever token the client connected with; the owner's own must not widen an agent's reach.
+        try (McpSyncClient asOwner = client(token("30", null))) {
+            asOwner.initialize();
+            CallToolResult refused = asOwner.callTool(new CallToolRequest("list_accounts", Map.of()));
+            assertTrue(Boolean.TRUE.equals(refused.isError()));
+            assertEquals("connect with the agent's own token, not a login token", text(refused));
+        }
+    }
+
+    @Test
+    void aFractionalAmountInARestBodyIsAnErrorNotATruncation() throws Exception {
+        Caller owner = new Caller("40", "USER");
+        long id = bank.create(owner, new NewAccount("mine", null)).getId();
+        HttpRequest deposit = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/bank/accounts/" + id + "/deposit"))
+                .header("Authorization", "Bearer " + token("40", null)).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"amount\":99.99}")).build();
+        HttpResponse<String> res = HttpClient.newHttpClient().send(deposit, HttpResponse.BodyHandlers.ofString());
+        assertEquals(400, res.statusCode(), res.body());
+        assertTrue(res.body().contains("\"error\""), res.body());
+        assertEquals(0, bank.get(owner, id).getBalance(), "nothing may have been credited");
     }
 
     private McpSyncClient client(String token) {

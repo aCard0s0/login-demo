@@ -31,8 +31,9 @@ import java.util.stream.Collectors;
  * as they do to the browser. Opening accounts, depositing and granting are not offered: an agent never may.
  *
  * <p>Who is asking comes from the {@code Authorization} header on the MCP request -- the token the agent
- * connected to agent-service with, forwarded as-is. An agent token names its agent, so an agent gets the
- * accounts opened for it and the ones it was granted; an owner's own token gets everything the owner has.
+ * connected to agent-service with, forwarded as-is. Only an agent token is served: it names its agent, so the
+ * agent gets the accounts opened for it and the ones it was granted. An owner's login token is refused,
+ * because through an agent it would hand that agent the owner's whole reach.
  * Only the two reading tools declare themselves read-only; that annotation is what agent-service's READ
  * permission keys on, so leaving it off {@code transfer} is the one thing this class must never do.
  *
@@ -105,6 +106,11 @@ public class AccountMcpServer {
                 .callHandler((context, request) -> {
                     try {
                         Caller caller = jwt.callerOf((String) context.get(AUTHORIZATION));
+                        // agent-service forwards whatever token the client connected with. The owner's login token
+                        // would give an agent the owner's whole reach here, so only an agent token is served.
+                        if (!caller.isAgent()) {
+                            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "connect with the agent's own token, not a login token");
+                        }
                         Map<String, Object> args = request.arguments() == null ? Map.of() : request.arguments();
                         return CallToolResult.builder().addTextContent(action.apply(caller, args)).build();
                     } catch (ResponseStatusException e) {
@@ -129,15 +135,16 @@ public class AccountMcpServer {
                 + " -> #" + t.getToAccount() + " " + t.getAmount() + " (" + t.getBy() + ")";
     }
 
+    /** A whole number. 40.9 cents is refused rather than silently becoming 40, and 5.7 is not account 5. */
     private static Long number(Map<String, Object> args, String key) {
         Object value = args.get(key);
-        if (value instanceof Number n) {
+        if (value instanceof Number n && n.doubleValue() == Math.rint(n.doubleValue())) {
             return n.longValue();
         }
         try {
             return Long.valueOf(String.valueOf(value));
         } catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, key + " must be a number");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, key + " must be a whole number");
         }
     }
 }

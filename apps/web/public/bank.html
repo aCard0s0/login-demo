@@ -55,7 +55,8 @@
       A <b>READ</b> grant lets an agent see another of your accounts and its history, <b>WRITE</b> lets it
       also transfer out of it. Agents can never open accounts, deposit, or change grants. To let an agent
       reach the bank at all, add <code>http://account-service:9084/mcp</code> to it on its page with
-      <i>send my login token</i> on.
+      <i>send my login token</i> on, and connect with the agent's own token: the bank refuses a login token
+      coming through an agent, since that would hand the agent everything you have.
     </p>
   </main>
 
@@ -74,7 +75,11 @@ const cell = (...children) => {
 };
 const badge = (text) => Object.assign(document.createElement('span'), { className: `badge ${text.toLowerCase()}`, textContent: text });
 const money = (cents) => (cents / 100).toFixed(2);
-const cents = (value) => Math.round(Number(value) * 100);
+// Units with at most two decimals, or nothing: "2.345" must not quietly become 234 cents and junk must not become null.
+const cents = (value) => {
+  if (!/^\d+(\.\d{1,2})?$/.test(String(value).trim())) throw new Error('amount must be like 12 or 12.50');
+  return Math.round(Number(value) * 100);
+};
 
 let agents = [];
 const agentName = (id) => agents.find((a) => a.id === id)?.name ?? `agent #${id}`;
@@ -109,7 +114,7 @@ const render = async () => {
         const value = prompt(`Deposit into ${a.name}: amount`);
         if (value === null) return;
         act(null, () => api(`/api/bank/accounts/${a.id}/deposit`, { method: 'POST', body: JSON.stringify({ amount: cents(value) }) }),
-          `Deposited ${money(cents(value))} into ${a.name}.`);
+          `Deposited ${value} into ${a.name}.`);
       }),
       button('History', null, () => { shown = shown === a.id ? null : a.id; renderHistory().catch(fail); }),
     );
@@ -138,10 +143,13 @@ const renderHistory = async () => {
 };
 
 const fail = (err) => { $('error').textContent = err.message; };
+// Every submit button is disabled while a request is in flight, so a double click cannot send a transfer twice.
+const buttons = () => document.querySelectorAll('form button');
 const act = async (question, action, success) => {
   if (question && !confirm(question)) return;
   $('error').textContent = '';
   $('done').textContent = '';
+  buttons().forEach((b) => { b.disabled = true; });
   try {
     await action();
     $('done').textContent = success;
@@ -149,6 +157,7 @@ const act = async (question, action, success) => {
     fail(err);
   }
   await Promise.all([render(), renderHistory()]).catch(fail);
+  buttons().forEach((b) => { b.disabled = false; });
 };
 
 $('open-form').onsubmit = (e) => {
@@ -169,7 +178,7 @@ $('transfer-form').onsubmit = (e) => {
     await api(`/api/bank/accounts/${from}/transfers`, { method: 'POST', body: JSON.stringify({ to: Number(to), amount: cents(amount) }) });
     $('transfer-to').value = '';
     $('transfer-amount').value = '';
-  }, `Moved ${money(cents(amount))} from #${from} to #${to}.`);
+  }, `Moved ${amount} from #${from} to #${to}.`);
 };
 
 $('grant-form').onsubmit = (e) => {
