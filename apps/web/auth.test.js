@@ -93,6 +93,9 @@ test('/api/bank and /api/public/bank reach account-service; /api/accounts still 
   // The login accounts and the money accounts share a word, not a service.
   await fetch(`${base}/api/accounts/me`);
   assert.equal(seen.at(-1).url, '/api/accounts/me');
+  // A whole segment, not a prefix: /api/banking is not the bank's.
+  await fetch(`${base}/api/banking`);
+  assert.equal(seen.at(-1).url, '/api/banking');
 });
 
 test('provider start returns the 302 for the browser to follow, not the proxy', async () => {

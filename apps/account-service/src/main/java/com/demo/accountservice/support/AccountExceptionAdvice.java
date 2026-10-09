@@ -1,5 +1,6 @@
 package com.demo.accountservice.support;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -23,5 +24,11 @@ public class AccountExceptionAdvice {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<?> unreadable(HttpMessageNotReadableException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", "malformed request body: amounts and ids are whole numbers"));
+    }
+
+    /** Two requests raced into the same row -- the same grant made twice at once, say. The loser may simply retry. */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<?> conflict(DataIntegrityViolationException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", "that changed at the same moment elsewhere; try again"));
     }
 }

@@ -6,5 +6,7 @@ import java.util.List;
 
 public interface TransferRepository extends JpaRepository<Transfer, Long> {
 
-    List<Transfer> findByFromAccountOrToAccountOrderByIdDesc(Long from, Long to);
+    // ponytail: newest 100 only, so a busy account cannot flood the page or an agent's context. Page with an
+    // id cursor ("before") when older history is needed.
+    List<Transfer> findTop100ByFromAccountOrToAccountOrderByIdDesc(Long from, Long to);
 }

@@ -63,7 +63,7 @@ public class AccountService {
 
     public List<Transfer> transfers(Caller caller, Long id) {
         Long account = get(caller, id).getId();
-        return transfers.findByFromAccountOrToAccountOrderByIdDesc(account, account);
+        return transfers.findTop100ByFromAccountOrToAccountOrderByIdDesc(account, account);
     }
 
     /** Opens an account for the caller, or for one of the caller's agents when {@code agentId} is given. */
@@ -83,29 +83,31 @@ public class AccountService {
     public Transfer transfer(Caller caller, Long from, Long to, Long amount) {
         Account source = writable(caller, from);
         long cents = positive(amount);
-        if (to == null || !accounts.existsById(to)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such destination account");
+        if (to == null) {
+            throw noSuchDestination();
         }
         long src = source.getId();
         if (src == to) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "source and destination are the same account");
         }
-        // Both rows are updated in ascending id order, so A->B and B->A racing cannot deadlock on Postgres. A
-        // failed debit rolls back whichever credit ran first.
+        // Both rows are updated in ascending id order, so A->B and B->A racing cannot deadlock on Postgres. Funds
+        // are judged before the destination: an unaffordable transfer is 400 whether or not that account exists,
+        // so the answer cannot be used to probe for ids for free. Either refusal rolls back the other update.
+        int debited, credited;
         if (src < to) {
-            debitOrFail(src, cents);
-            accounts.credit(to, cents);
+            debited = accounts.debit(src, cents);
+            credited = accounts.credit(to, cents);
         } else {
-            accounts.credit(to, cents);
-            debitOrFail(src, cents);
+            credited = accounts.credit(to, cents);
+            debited = accounts.debit(src, cents);
         }
-        return transfers.save(new Transfer(src, to, cents, caller.describe()));
-    }
-
-    private void debitOrFail(long from, long cents) {
-        if (accounts.debit(from, cents) == 0) {
+        if (debited == 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "insufficient funds");
         }
+        if (credited == 0) {
+            throw noSuchDestination();
+        }
+        return transfers.save(new Transfer(src, to, cents, caller.describe()));
     }
 
     /** Grants, or changes, what one agent may do with this account. Only the owner (or an admin) may. */
@@ -141,8 +143,8 @@ public class AccountService {
     /** An account this caller may move money out of, or 404. */
     private Account writable(Caller caller, Long id) {
         Account account = get(caller, id);
-        boolean granted = caller.isAgent() && grant(account, caller.agentId()) != null
-                && grant(account, caller.agentId()).getAccess() == Access.WRITE;
+        AccountPermission grant = caller.isAgent() ? grant(account, caller.agentId()) : null;
+        boolean granted = grant != null && grant.getAccess() == Access.WRITE;
         if (!(caller.writesEveryone() || owns(caller, account) || granted)) {
             throw notFound();
         }
@@ -191,6 +193,10 @@ public class AccountService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name is too long");
         }
         return name.strip();
+    }
+
+    private static ResponseStatusException noSuchDestination() {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "no such destination account");
     }
 
     private static ResponseStatusException notFound() {

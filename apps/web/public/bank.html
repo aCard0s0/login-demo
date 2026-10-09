@@ -143,8 +143,8 @@ const renderHistory = async () => {
 };
 
 const fail = (err) => { $('error').textContent = err.message; };
-// Every submit button is disabled while a request is in flight, so a double click cannot send a transfer twice.
-const buttons = () => document.querySelectorAll('form button');
+// Every button -- forms and table rows alike -- is disabled while a request is in flight, so a double click cannot send anything twice.
+const buttons = () => document.querySelectorAll('main button');
 const act = async (question, action, success) => {
   if (question && !confirm(question)) return;
   $('error').textContent = '';
