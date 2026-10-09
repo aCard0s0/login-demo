@@ -28,6 +28,11 @@ COPY --from=build /src/apps/agent-service/target/agent-service-*.jar app.jar
 EXPOSE 9083
 CMD ["java", "-jar", "app.jar"]
 
+FROM runtime AS account-service
+COPY --from=build /src/apps/account-service/target/account-service-*.jar app.jar
+EXPOSE 9084
+CMD ["java", "-jar", "app.jar"]
+
 # No dependencies to install: server.js is plain node with an empty package.json.
 FROM node:22-alpine AS web
 WORKDIR /app

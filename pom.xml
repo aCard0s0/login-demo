@@ -15,12 +15,13 @@
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>login-demo</name>
-    <description>Multi-module demo: auth-service + todo-service + agent-service + web frontend</description>
+    <description>Multi-module demo: auth-service + todo-service + agent-service + account-service + web frontend</description>
 
     <modules>
         <module>apps/auth-service</module>
         <module>apps/todo-service</module>
         <module>apps/agent-service</module>
+        <module>apps/account-service</module>
     </modules>
 
     <properties>

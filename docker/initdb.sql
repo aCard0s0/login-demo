@@ -10,3 +10,6 @@ CREATE DATABASE todo OWNER todo;
 
 CREATE USER agent WITH PASSWORD 'agent';
 CREATE DATABASE agent OWNER agent;
+
+CREATE USER account WITH PASSWORD 'account';
+CREATE DATABASE account OWNER account;

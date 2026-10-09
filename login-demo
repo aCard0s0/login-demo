@@ -33,8 +33,8 @@ cd "$ROOT"
 # ── config: every knob env-overridable, every name prefixed with the tool ──
 PROJECT="${LOGIN_DEMO_PROJECT:-login-demo}"; PORT="${LOGIN_DEMO_PORT:-3000}"
 COMPOSE_FILE="${LOGIN_DEMO_COMPOSE_FILE:-$ROOT/compose.yaml}"
-SERVICES="db auth-service todo-service agent-service web"   # valid targets; feeds help and did-you-mean
-MODULES="auth-service todo-service agent-service"          # the Maven modules, a subset of SERVICES
+SERVICES="db auth-service todo-service agent-service account-service web"   # valid targets; feeds help and did-you-mean
+MODULES="auth-service todo-service agent-service account-service"          # the Maven modules, a subset of SERVICES
 DRY_RUN=""; ASSUME_YES=""; VERBOSE=""; TMP_DIR=""; CURRENT_CMD=""
 TARGETS=(); OPT_BUILD=""; OPT_NOCACHE=""
 # ── output: colour only on a TTY; values on stdout, prose on stderr ──
@@ -332,6 +332,20 @@ cmd_verify() {
     die "todo-service served a list with no token at all" 1
   fi
 
+  step "opening a bank account and moving money"
+  local acct
+  acct=$(curl -fsS -X POST "$base/api/bank/accounts" -H "Authorization: Bearer $token" \
+    -H 'content-type: application/json' -d '{"name":"verify"}') \
+    || die "account-service rejected the token — check it can reach the JWKS endpoint" 1
+  id=$(printf '%s' "$acct" | sed -E 's/^\{"id":([0-9]+).*/\1/')
+  curl -fsS -o /dev/null -X POST "$base/api/bank/accounts/$id/deposit" -H "Authorization: Bearer $token" \
+    -H 'content-type: application/json' -d '{"amount":100}' || die "the deposit was refused" 1
+  acct=$(curl -fsS "$base/api/bank/accounts/$id" -H "Authorization: Bearer $token")
+  case "$acct" in *'"balance":100'*) ;; *) die "the deposit did not stick: $acct" 1 ;; esac
+  if curl -fsS -o /dev/null "$base/api/bank/accounts" 2>/dev/null; then
+    die "account-service served a list with no token at all" 1
+  fi
+
   step "creating an agent"
   local agent
   agent=$(curl -fsS -X POST "$base/api/agents" -H "Authorization: Bearer $token" \
@@ -362,11 +376,11 @@ cmd_verify() {
     die "the MCP endpoint listed tools with no token at all" 1
   fi
 
-  say "ok — auth-service signed a JWT, todo-service and agent-service verified it locally, an MCP client saw only what READ allows"
-  note "this left an account, a todo and an agent behind: $email"
+  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows"
+  note "this left an account, a todo, a bank account and an agent behind: $email"
   note "connect your own agent: open /agent?id=$id, Create token, paste the claude mcp add line"
 }
-cmd_verify_help() { say "  Needs a running stack. It writes: one account, one todo and one agent, all real, all"
+cmd_verify_help() { say "  Needs a running stack. It writes: one account, one todo, one bank account and one agent, all real, all"
                     say "  left behind. \`$PROG db reset\` is how you clear them out. No model is involved."; }
 cmd_doctor() {
   no_args "$@"

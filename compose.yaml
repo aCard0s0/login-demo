@@ -1,4 +1,4 @@
-# Only web publishes a port. The three services and the database talk over the compose network,
+# Only web publishes a port. The four services and the database talk over the compose network,
 # which is the same shape as production: the browser reaches everything through the one origin.
 services:
   db:
@@ -121,6 +121,31 @@ services:
       timeout: 3s
       retries: 20
 
+  account-service:
+    build:
+      context: .
+      target: account-service
+    # Same JVM arithmetic as todo-service: a small service with one MCP server and no client.
+    mem_limit: 288m
+    cpus: 1.0
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=50
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/account
+      SPRING_DATASOURCE_USERNAME: account
+      SPRING_DATASOURCE_PASSWORD: account
+      AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
+      AUTH_TOKEN_VERSIONS_URI: http://auth-service:9081/internal/token-versions
+    depends_on:
+      db:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9084/api/public/bank/stats || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   web:
     build:
       context: .
@@ -132,6 +157,7 @@ services:
       AUTH_URL: http://auth-service:9081
       TODO_URL: http://todo-service:9082
       AGENT_URL: http://agent-service:9083
+      ACCOUNT_URL: http://account-service:9084
     ports:
       - "3000:3000"
     depends_on:
@@ -140,6 +166,8 @@ services:
       todo-service:
         condition: service_healthy
       agent-service:
+        condition: service_healthy
+      account-service:
         condition: service_healthy
     # So `start` (compose up --wait) returns once node is actually listening, and `verify` right after it works.
     healthcheck:
