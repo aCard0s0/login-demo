@@ -242,7 +242,7 @@ cmd_down() {
     shift
   done
   require_docker
-  if [ -n "$vols" ]; then confirm "delete every '$PROJECT' data volume? every account, todo and agent goes with it"; fi
+  if [ -n "$vols" ]; then confirm "delete every '$PROJECT' data volume? every account, todo, agent and bank account goes with it"; fi
   local f=(down --remove-orphans); [ -z "$vols" ] || f+=(--volumes)
   compose "${f[@]}"; say "removed containers and network${vols:+, and the data volumes}"
 }
@@ -278,7 +278,7 @@ cmd_shell() {
 cmd_shell_help() { say "  Every image here is Alpine or Debian-slim, so the shell is sh, not bash."; }
 cmd_db_reset() {
   no_args "$@"; require_docker
-  confirm "throw away the '$PROJECT' database? every account, todo and agent goes with it"
+  confirm "throw away the '$PROJECT' database? every account, todo, agent and bank account goes with it"
   step "recreating the database"
   compose stop                         # the services hold connections open
   compose rm -fs db
@@ -286,13 +286,13 @@ cmd_db_reset() {
   compose up -d --wait db
   say "database recreated empty — bring the services back with ./$PROG start"
 }
-cmd_db_reset_help() { say "  Drops the volume, so the init script runs again and both databases and roles"
-                      say "  are recreated. The services are left stopped; \`$PROG start\` brings them back."; }
+cmd_db_reset_help() { say "  Drops the volume, so the init script runs again and every database and role"
+                      say "  is recreated. The services are left stopped; \`$PROG start\` brings them back."; }
 cmd_verify() {
   no_args "$@"
   have curl || die "curl is not on PATH — verify talks to the stack over real HTTP" 3
   local base="http://localhost:$PORT" email pass token todos id
-  if [ -n "$DRY_RUN" ]; then note "+ would register an account and a todo against $base"; return 0; fi
+  if [ -n "$DRY_RUN" ]; then note "+ would register an account and write a todo, a bank account and an agent against $base"; return 0; fi
 
   curl -fsS -o /dev/null "$base/api/public/stats" 2>/dev/null \
     || die "nothing is answering on $base — start the stack with ./$PROG start" 4
@@ -341,7 +341,7 @@ cmd_verify() {
   curl -fsS -o /dev/null -X POST "$base/api/bank/accounts/$id/deposit" -H "Authorization: Bearer $token" \
     -H 'content-type: application/json' -d '{"amount":100}' || die "the deposit was refused" 1
   acct=$(curl -fsS "$base/api/bank/accounts/$id" -H "Authorization: Bearer $token")
-  case "$acct" in *'"balance":100'*) ;; *) die "the deposit did not stick: $acct" 1 ;; esac
+  case "$acct" in *'"balance":100,'*) ;; *) die "the deposit did not stick: $acct" 1 ;; esac
   if curl -fsS -o /dev/null "$base/api/bank/accounts" 2>/dev/null; then
     die "account-service served a list with no token at all" 1
   fi
@@ -364,6 +364,10 @@ cmd_verify() {
   atoken=$(curl -fsS -X POST "$base/api/agents/$id/token" -H "Authorization: Bearer $token" \
     | sed -E 's/.*"token":"([^"]+)".*/\1/') || die "agent-service could not get a token from auth-service" 1
   case "$atoken" in *.*.*) ;; *) die "the agent token did not come back as a three-part JWT: $atoken" 1 ;; esac
+  # An agent's way into the bank is MCP through agent-service, where READ/WRITE and the activity log apply.
+  local code
+  code=$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/bank/accounts" -H "Authorization: Bearer $atoken") || true
+  [ "$code" = 403 ] || die "the bank's REST API answered the agent token with $code, not 403" 1
   # The point of the whole design: an MCP client with the agent's token sees the one read-only todo tool and no other.
   tools=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" \
     -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
@@ -376,7 +380,7 @@ cmd_verify() {
     die "the MCP endpoint listed tools with no token at all" 1
   fi
 
-  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows"
+  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows, the bank refused the agent token over REST"
   note "this left an account, a todo, a bank account and an agent behind: $email"
   note "connect your own agent: open /agent?id=$id, Create token, paste the claude mcp add line"
 }
