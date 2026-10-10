@@ -16,7 +16,7 @@ user/      UserService  UserController  CurrentUserResolver  AdminSeeder
   dto/       UserResponse  NewUser  UpdateUser  RoleChange  Suspension
 session/   Session  SessionService  SessionController  LoginRequest  LoginResponse
 token/     Tokens  JwksController
-oauth/     OAuthProvider  OAuthProperties  OAuthService  OAuthController
+oauth/     OAuthController   (the flow and the providers are libs/auth-provider)
 internal/  AgentTokenController  TokenVersionController   (the /internal endpoints: compose network only)
 stats/     StatsController  PublicStats
 support/   AuthExceptionAdvice  AttemptWindow  Passwords
@@ -55,9 +55,12 @@ Two rules worth knowing:
 
 - **An admin cannot demote itself.** The last one doing so would leave nobody able to promote anybody ever
   again, so `UserService.changeRole` refuses it rather than trusting whoever writes the next controller.
-- **The role is read from the user row, not from the token's claims.** A promotion or demotion takes
-  effect on the next request, on a token the holder already has. (todo-service is the opposite -- see its
-  README for why.)
+- **A change of role revokes every token the user holds**, the same as a suspension. The role rides inside
+  the token and todo-, agent- and wallet-service read it from there (see todo-service's README for why), so
+  a demotion that left the old token alive would keep its holder an admin everywhere else for up to
+  `auth.token-ttl`. The user logs in again and gets the new role; setting the role a user already has
+  revokes nothing. This service itself reads the role from the row, so here it would have bitten on the next
+  request either way.
 
 An **agent token** -- the `AGENT` role, minted for one of a user's agents -- is 403 on every endpoint here,
 `GET /api/users/me` included. Its only way in is `/mcp` through agent-service; let in here it could change
@@ -113,10 +116,13 @@ then have to be switched off. Only the hash is stored.
 
 ## Signing in with Google or GitHub
 
-The OAuth 2.0 authorization-code flow, written out by hand in `oauth/` against `RestClient`. Not
-`spring-boot-starter-oauth2-client`, for the same reason the passwords are not `spring-boot-starter-security`:
-it installs a filter chain this service does not have, and switching it back off is more code than the flow.
-Nothing here needs a filter -- the browser arrives at two ordinary endpoints.
+The OAuth 2.0 authorization-code flow, written out by hand against `RestClient` in
+[libs/auth-provider](../../libs/auth-provider/README.md): `OAuthFlow` builds the consent URL and trades the
+code for a verified `Identity`, and each provider is its own jar (`auth-provider-google`, `auth-provider-github`)
+that this service depends on. Not `spring-boot-starter-oauth2-client`, for the same reason the passwords are
+not `spring-boot-starter-security`: it installs a filter chain this service does not have, and switching it
+back off is more code than the flow. What stays here is `OAuthController`: the two redirects, the state and
+PKCE cookies, and what to do with the identity that comes back -- match it to a user and mint one of our tokens.
 
 ```
 GET /api/oauth/google/start      302 -> accounts.google.com, with a state cookie planted
@@ -273,7 +279,7 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 | GET | `/api/users/me` | the caller themselves; an agent token is 403 |
 | PUT | `/api/users/me` | `{name, email, currentPassword, newPassword?}` -> the user plus a fresh `token`; a new password revokes every other; an agent token is 403 |
 | GET | `/api/users` | everyone -- admin and moderator only, else 403 |
-| PUT | `/api/users/{id}/role` | `{role}` -- admin only, else 403 |
+| PUT | `/api/users/{id}/role` | `{role}` -- admin only, else 403; a change also revokes the user's tokens |
 | PUT | `/api/users/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |
 | POST | `/api/users/{id}/revoke` | no body -- admin only; kills every token the user holds |
 | GET | `/internal/token-versions` | `{"<userId>": version, "agent:<agentId>": version}` for every revoked user and agent; todo-, agent- and wallet-service poll it |

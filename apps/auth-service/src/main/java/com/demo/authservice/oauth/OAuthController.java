@@ -1,5 +1,10 @@
 package com.demo.authservice.oauth;
 
+import com.demo.auth.provider.Identity;
+import com.demo.auth.provider.OAuthFlow;
+import com.demo.auth.provider.OAuthProperties;
+import com.demo.auth.provider.OAuthProvider;
+import com.demo.authservice.user.UserService;
 import com.demo.authservice.user.entities.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +30,8 @@ import java.util.List;
 
 /**
  * The two redirects a browser walks through to log in with a provider, plus the list the login page reads
- * to know which buttons to draw.
+ * to know which buttons to draw. The flow itself is {@link OAuthFlow} in libs/auth-provider; what stays here
+ * is what this service does with the identity that comes back: match it to a user and mint one of our tokens.
  *
  * <p>Both endpoints answer with a 302 rather than JSON, because the browser -- not the frontend's fetch --
  * is what travels through them.
@@ -58,13 +64,16 @@ public class OAuthController {
 
     private final SecureRandom random = new SecureRandom();
 
-    private final OAuthService oauth;
+    private final OAuthFlow oauth;
 
     private final OAuthProperties config;
 
-    public OAuthController(OAuthService oauth, OAuthProperties config) {
+    private final UserService users;
+
+    public OAuthController(OAuthFlow oauth, OAuthProperties config, UserService users) {
         this.oauth = oauth;
         this.config = config;
+        this.users = users;
     }
 
     /** One enabled provider, as the login page needs it. */
@@ -77,7 +86,7 @@ public class OAuthController {
     @GetMapping("/providers")
     public List<ProviderSummary> providers() {
         return oauth.enabled().stream()
-                .map(provider -> new ProviderSummary(provider.key(), label(provider)))
+                .map(provider -> new ProviderSummary(provider.getKey(), provider.getLabel()))
                 .toList();
     }
 
@@ -113,33 +122,33 @@ public class OAuthController {
                 .header(HttpHeaders.SET_COOKIE, cookie(VERIFIER_COOKIE, "", Duration.ZERO).toString());
 
         if (error != null && !error.isBlank()) {
-            return done.header(HttpHeaders.LOCATION, landing("error", "sign-in with " + label(target) + " was cancelled")).build();
+            return done.header(HttpHeaders.LOCATION, landing("error", "sign-in with " + target.getLabel() + " was cancelled")).build();
         }
         if (!matches(expectedState, state) || verifier == null || verifier.isBlank()) {
             return done.header(HttpHeaders.LOCATION, landing("error", "that sign-in did not start here, try again")).build();
         }
         if (code == null || code.isBlank()) {
-            return done.header(HttpHeaders.LOCATION, landing("error", label(target) + " sent no authorization code")).build();
+            return done.header(HttpHeaders.LOCATION, landing("error", target.getLabel() + " sent no authorization code")).build();
         }
         try {
-            User user = oauth.login(target, code, verifier);
+            Identity identity = oauth.identity(target, code, verifier);
+            User user = users.findOrCreateFromOAuth(identity.email(), identity.name());
             if (user.isSuspended()) {
                 return done.header(HttpHeaders.LOCATION, landing("error", "this user is suspended")).build();
             }
-            return done.header(HttpHeaders.LOCATION, landing("token", oauth.issue(user))
+            return done.header(HttpHeaders.LOCATION, landing("token", users.issue(user))
                     + "&name=" + encode(user.getName()) + "&role=" + user.getRole().name()).build();
         } catch (Exception e) {
             // The provider's own wording can name internals, so the browser gets a flat message and the
             // detail goes to the container log.
-            log.warn("{} sign-in failed", target.key(), e);
-            return done.header(HttpHeaders.LOCATION, landing("error", "could not sign you in with " + label(target))).build();
+            log.warn("{} sign-in failed", target.getKey(), e);
+            return done.header(HttpHeaders.LOCATION, landing("error", "could not sign you in with " + target.getLabel())).build();
         }
     }
 
     /** A disabled provider is a 404, the same answer an unknown one gets: config is nobody else's business. */
     private OAuthProvider enabled(String provider) {
-        return OAuthProvider.of(provider)
-                .filter(oauth::isEnabled)
+        return oauth.enabled(provider)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown or disabled provider"));
     }
 
@@ -148,7 +157,7 @@ public class OAuthController {
      * token is never sent to a server, logged by the proxy, or handed on in a Referer header.
      */
     private String landing(String key, String value) {
-        return config.getRedirectBaseUrl().replaceAll("/+$", "") + "/login#" + key + "=" + encode(value);
+        return config.baseUrl() + "/login#" + key + "=" + encode(value);
     }
 
     /** 32 random bytes as base64url: 43 characters, which is exactly PKCE's minimum for a verifier. */
@@ -174,10 +183,6 @@ public class OAuthController {
             return false;
         }
         return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), actual.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String label(OAuthProvider provider) {
-        return provider == OAuthProvider.GOOGLE ? "Google" : "GitHub";
     }
 
     private static String encode(String value) {

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.demo</groupId>
+        <artifactId>login-demo</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>auth-provider</artifactId>
+    <packaging>pom</packaging>
+    <name>auth-provider</name>
+    <description>Signing in with an external provider: the flow once, in core, and one module per provider</description>
+
+    <!-- Aggregator only. core holds the flow and the contract; each provider is its own jar so a service
+         depends on exactly the providers it offers. -->
+    <modules>
+        <module>core</module>
+        <module>google</module>
+        <module>github</module>
+    </modules>
+</project>
