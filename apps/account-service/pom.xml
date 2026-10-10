@@ -18,6 +18,24 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- ErrorBodyAdvice: the {error} body every service answers a rejection with. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>web-errors</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- JwtVerifier, Revocations and Caller: the one copy the three token-verifying services share. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-client</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- McpEndpoint and Args: the /mcp endpoint and tool-argument parsing the MCP-serving services share. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>mcp-server</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- The MCP server at /mcp, through which an agent reaches the accounts it owns or was granted. Version from the root BOM. -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>

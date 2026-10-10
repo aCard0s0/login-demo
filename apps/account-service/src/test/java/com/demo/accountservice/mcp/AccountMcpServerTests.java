@@ -3,7 +3,7 @@ package com.demo.accountservice.mcp;
 import com.demo.accountservice.account.dto.Access;
 import com.demo.accountservice.account.AccountService;
 import com.demo.accountservice.account.dto.NewAccount;
-import com.demo.accountservice.token.Caller;
+import com.demo.auth.client.Caller;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.RSASSASigner;
@@ -244,7 +244,7 @@ class AccountMcpServerTests {
                     .claim("role", agent == null ? "USER" : "AGENT")
                     .expirationTime(Date.from(Instant.now().plusSeconds(300)));
             if (agent != null) {
-                claims.claim("agent", agent);
+                claims.claim("agent", agent).claim("agentVer", 0);
             }
             SignedJWT jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(KEY.getKeyID()).build(), claims.build());
             jwt.sign(new RSASSASigner(KEY));

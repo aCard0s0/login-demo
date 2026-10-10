@@ -2,16 +2,17 @@ package com.demo.agentservice.mcp;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.agent.Access;
-import com.demo.agentservice.agent.Agent;
+import com.demo.agentservice.agent.dto.Access;
+import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.AgentService;
-import com.demo.agentservice.agent.NewAgent;
-import com.demo.agentservice.agent.NewMcpServer;
-import com.demo.agentservice.agent.OthersAccess;
-import com.demo.agentservice.agent.UpdateAgent;
-import com.demo.agentservice.agent.UpdateMcpServer;
-import com.demo.agentservice.token.Caller;
-import com.demo.agentservice.token.JwtVerifier;
+import com.demo.agentservice.agent.dto.NewAgent;
+import com.demo.agentservice.agent.dto.NewMcpServer;
+import com.demo.agentservice.agent.dto.OthersAccess;
+import com.demo.agentservice.agent.ServerUrls;
+import com.demo.agentservice.agent.dto.UpdateAgent;
+import com.demo.agentservice.agent.dto.UpdateMcpServer;
+import com.demo.auth.client.Caller;
+import com.demo.auth.client.JwtVerifier;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -21,6 +22,7 @@ import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecifi
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.ImageContent;
 import io.modelcontextprotocol.spec.McpSchema.InitializeResult;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
@@ -34,10 +36,13 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.InetAddress;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -60,14 +65,28 @@ import static org.mockito.Mockito.when;
         "spring.datasource.url=jdbc:sqlite:target/mcp-test.db",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.datasource.hikari.maximum-pool-size=1",
+        // The fake server is on loopback. Under this exact URL the deployment trusts it, annotations and all; under any
+        // other (a query string will do) it is an untrusted server, which the resolver below lets through the IP check.
+        // The port is only known once the server is up; ServerUrls reads this on every call, so the placeholder is fine.
+        "agents.trusted-server-urls=http://127.0.0.1:${local.server.port}/fake-mcp",
 })
 class AgentMcpServerTests {
 
     /** Every tool call the fake server received, by tool name. */
     static final List<String> CALLS = new CopyOnWriteArrayList<>();
 
+    /** While true, 127.0.0.1 is reported as a public address, so the loopback fake server can stand in for an untrusted public one. */
+    static volatile boolean loopbackLooksPublic = true;
+
     @TestConfiguration
     static class FakeMcp {
+        @Bean
+        @Primary
+        ServerUrls serverUrls(Environment env) {
+            return new ServerUrls(env, host -> new InetAddress[] {
+                    InetAddress.getByName(loopbackLooksPublic && host.equals("127.0.0.1") ? "93.184.216.34" : host)});
+        }
+
         @Bean
         ServletRegistrationBean<HttpServletStatelessServerTransport> fakeMcp() {
             HttpServletStatelessServerTransport transport = HttpServletStatelessServerTransport.builder()
@@ -77,12 +96,25 @@ class AgentMcpServerTests {
                     .build();
             McpServer.sync(transport).serverInfo("fake", "0").capabilities(ServerCapabilities.builder().tools(false).build())
                     .tools(tool("read_thing", ToolAnnotations.builder().readOnlyHint(true).build()),
-                            tool("write_thing", null))
+                            tool("write_thing", null),
+                            picture())
                     .build();
             ServletRegistrationBean<HttpServletStatelessServerTransport> servlet = new ServletRegistrationBean<>(transport, "/fake-mcp");
             servlet.setName("fake-mcp");
             servlet.setAsyncSupported(true);
             return servlet;
+        }
+
+        /** A tool whose result is not text: a one-pixel PNG plus structured content, as a real server might answer. */
+        static final String PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+        private static SyncToolSpecification picture() {
+            Tool tool = Tool.builder().name("picture_thing").description("a picture").inputSchema(Map.of("type", "object")).build();
+            return SyncToolSpecification.builder().tool(tool).callHandler((context, request) -> {
+                CALLS.add("picture_thing");
+                return CallToolResult.builder().addTextContent("here you go").addContent(new ImageContent(null, PNG, "image/png"))
+                        .structuredContent(Map.of("width", 1, "height", 1)).build();
+            }).build();
         }
 
         private static SyncToolSpecification tool(String name, ToolAnnotations annotations) {
@@ -120,6 +152,7 @@ class AgentMcpServerTests {
     @BeforeEach
     void setUp() {
         CALLS.clear();
+        loopbackLooksPublic = true;
         when(jwt.callerOf(any())).thenAnswer(call -> switch (String.valueOf((Object) call.getArgument(0))) {
             case "Bearer tok-100" -> OWNER;
             case "Bearer tok-101" -> STRANGER;
@@ -128,11 +161,20 @@ class AgentMcpServerTests {
         });
     }
 
-    /** An agent whose only server is the fake one, with the given access. */
+    /** An agent whose only server is the fake one, trusted by the deployment, with the given access. */
     private Agent agentWith(Access access, OthersAccess others) {
+        return agentWith(access, others, "/fake-mcp", null);
+    }
+
+    /** The same server reached by a URL the deployment does not trust: an owner's own server, as far as the gateway knows. */
+    private Agent agentWithUntrusted(Access access, List<String> readOnlyTools) {
+        return agentWith(access, OthersAccess.NONE, "/fake-mcp?untrusted", readOnlyTools);
+    }
+
+    private Agent agentWith(Access access, OthersAccess others, String endpoint, List<String> readOnlyTools) {
         Agent agent = agents.create(OWNER, new NewAgent("gateway", "Be brief.", others));
         agents.removeServer(OWNER, agent.getId(), agent.getServers().get(0).getId(), "");
-        agents.addServer(OWNER, agent.getId(), new NewMcpServer("fake", "http://localhost:" + port + "/fake-mcp", null, true, access), "");
+        agents.addServer(OWNER, agent.getId(), new NewMcpServer("fake", "http://127.0.0.1:" + port + endpoint, null, true, access, readOnlyTools), "");
         return agents.get(OWNER, agent.getId());
     }
 
@@ -191,7 +233,7 @@ class AgentMcpServerTests {
         Agent agent = agentWith(Access.WRITE, OthersAccess.NONE);
         Long server = agent.getServers().get(0).getId();
         try (McpSyncClient client = connect("tok-100", agent.getId())) {
-            assertEquals(List.of("fake__read_thing", "fake__write_thing"), names(client));
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client));
             assertFalse(Boolean.TRUE.equals(client.callTool(new CallToolRequest("fake__write_thing", Map.of())).isError()));
 
             // The owner flips the server to READ while the agent is connected.
@@ -231,7 +273,7 @@ class AgentMcpServerTests {
                     text(client.callTool(new CallToolRequest("update_agent", Map.of("id", sibling.getId(), "name", "renamed")))));
             CallToolResult malformed = client.callTool(new CallToolRequest("get_agent", Map.of("id", "seven")));
             assertTrue(Boolean.TRUE.equals(malformed.isError()));
-            assertEquals("id must be a number", text(malformed), "a bad argument is the model's mistake, not a refusal");
+            assertEquals("id must be a whole number", text(malformed), "a bad argument is the model's mistake, not a refusal");
             assertEquals("sibling", agents.get(OWNER, sibling.getId()).getName());
 
             // WRITE: the sibling can be changed, and both logs say so; the agent itself stays out of reach.
@@ -250,7 +292,7 @@ class AgentMcpServerTests {
         List<String> denied = log(agent.getId(), Activity.TOOL_DENIED);
         assertEquals("update_agent: an agent cannot change its own configuration", denied.get(0));
         assertEquals("set_mcp_access: an agent cannot change its own configuration", denied.get(1));
-        assertTrue(denied.stream().noneMatch(d -> d.contains("must be a number")), "malformed arguments are not refusals: " + denied);
+        assertTrue(denied.stream().noneMatch(d -> d.contains("must be a whole number")), "malformed arguments are not refusals: " + denied);
     }
 
     @Test
@@ -264,6 +306,11 @@ class AgentMcpServerTests {
             assertEquals(List.of("fake__read_thing"), names(client));
             assertEquals("read_thing saw Bearer agent-tok", text(client.callTool(new CallToolRequest("fake__read_thing", Map.of()))),
                     "the agent token is what gets forwarded, so a downstream server sees the owner");
+            // The 30-day token buys no more than the row allows: READ lists, and a write is refused before it is forwarded.
+            CallToolResult refused = client.callTool(new CallToolRequest("fake__write_thing", Map.of()));
+            assertTrue(Boolean.TRUE.equals(refused.isError()));
+            assertEquals("denied: needs WRITE on server 'fake' (has READ)", text(refused));
+            assertEquals(List.of("read_thing"), CALLS);
         }
 
         // The agent token names its agent, so plain /mcp works with it.
@@ -278,6 +325,82 @@ class AgentMcpServerTests {
         assertRefused(() -> connect(null, agent.getId()), "invalid or expired token");
         assertRefused(() -> connect("tok-100", null), "which agent? connect to /mcp?agent=<id>");
         assertEquals(2, log(agent.getId(), Activity.CONNECTED).size(), "only the two accepted connections are in the log");
+
+        // A stored header, rather than the caller's token: encrypted at rest, and what the server actually receives.
+        pinned = agent.getId();
+        agents.updateServer(OWNER, agent.getId(), agent.getServers().get(0).getId(),
+                new UpdateMcpServer(null, null, "Bearer stored-s3cret", false, null), "");
+        try (McpSyncClient client = connect("agent-tok", null)) {
+            assertEquals("read_thing saw Bearer stored-s3cret", text(client.callTool(new CallToolRequest("fake__read_thing", Map.of()))));
+        }
+    }
+
+    /** The gateway passes a result through whole: an image is still an image on the other side, and structured content survives. */
+    @Test
+    void imagesAndStructuredContentComeThroughTheGatewayUnchanged() {
+        Agent agent = agentWith(Access.WRITE, OthersAccess.NONE);
+        try (McpSyncClient client = connect("tok-100", agent.getId())) {
+            CallToolResult result = client.callTool(new CallToolRequest("fake__picture_thing", Map.of()));
+            assertFalse(Boolean.TRUE.equals(result.isError()));
+            assertEquals(2, result.content().size(), result.content().toString());
+            assertEquals("here you go", text(result));
+            ImageContent image = (ImageContent) result.content().get(1);
+            assertEquals("image/png", image.mimeType());
+            assertEquals(FakeMcp.PNG, image.data(), "the bytes are the server's, not a toString of them");
+            assertEquals(Map.of("width", 1, "height", 1), result.structuredContent());
+        }
+        String logged = log(agent.getId(), Activity.TOOL_CALL).get(0);
+        assertTrue(logged.startsWith("fake__picture_thing {} -> ok: here you go [image image/png] [structured {"), logged);
+        assertTrue(logged.contains("width=1") && logged.contains("height=1") && !logged.contains(FakeMcp.PNG), "a summary, never the bytes: " + logged);
+    }
+
+    /** The URL policy runs again at connect time, against what the name resolves to then, not only when the row was saved. */
+    @Test
+    void aServerPublicWhenSavedButPrivateWhenConnectingIsRefusedAtConnect() {
+        Agent agent = agentWithUntrusted(Access.WRITE, List.of("read_thing"));
+        try (McpSyncClient client = connect("tok-100", agent.getId())) {
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client), "public: reachable");
+            // Between two calls the name starts resolving to the loopback address it really is: DNS rebinding.
+            loopbackLooksPublic = false;
+            assertEquals(List.of(), names(client), "the listing refuses it before connecting");
+            CallToolResult refused = client.callTool(new CallToolRequest("fake__read_thing", Map.of()));
+            assertTrue(Boolean.TRUE.equals(refused.isError()));
+            assertEquals("error: the tool call failed; the agent's activity log has the detail", text(refused));
+            loopbackLooksPublic = true;
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client), "public again: reachable again");
+        }
+        assertEquals(List.of(), CALLS, "nothing reached the server while it was refused");
+        List<String> calls = log(agent.getId(), Activity.TOOL_CALL);
+        assertTrue(calls.get(0).startsWith("fake__read_thing {} -> error: refused: '127.0.0.1' resolves to 127.0.0.1"), calls.toString());
+        assertTrue(calls.get(1).startsWith("server 'fake': could not connect: refused: '127.0.0.1' resolves to 127.0.0.1"), calls.toString());
+    }
+
+    /** A server the owner typed in can annotate anything, so on it READ is the owner's list and the annotation is ignored. */
+    @Test
+    void onAnUntrustedServerReadOffersOnlyWhatTheOwnerMarkedReadOnly() {
+        // The owner marks write_thing, not read_thing: perverse, and exactly what proves whose word counts.
+        Agent agent = agentWithUntrusted(Access.READ, List.of("write_thing"));
+        Long server = agent.getServers().get(0).getId();
+        try (McpSyncClient client = connect("tok-100", agent.getId())) {
+            assertEquals(List.of("fake__write_thing"), names(client), "the server's readOnlyHint on read_thing is not trusted");
+            CallToolResult refused = client.callTool(new CallToolRequest("fake__read_thing", Map.of()));
+            assertTrue(Boolean.TRUE.equals(refused.isError()));
+            assertEquals("denied: needs WRITE on server 'fake' (has READ)", text(refused));
+            assertFalse(Boolean.TRUE.equals(client.callTool(new CallToolRequest("fake__write_thing", Map.of())).isError()));
+
+            // The owner clears the list: READ on an untrusted server then offers nothing at all.
+            agents.updateServer(OWNER, agent.getId(), server, new UpdateMcpServer(null, null, null, null, null, List.of()), "");
+            assertEquals(List.of(), names(client));
+            assertTrue(Boolean.TRUE.equals(client.callTool(new CallToolRequest("fake__write_thing", Map.of())).isError()));
+
+            // WRITE offers everything, whatever the list says.
+            agents.updateServer(OWNER, agent.getId(), server, new UpdateMcpServer(null, null, null, null, Access.WRITE, null), "");
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client));
+        }
+        assertEquals(List.of("write_thing"), CALLS);
+        assertEquals("server 'fake' read-only tools cleared", log(agent.getId(), Activity.CONFIG_CHANGED).get(1));
+        assertEquals(List.of("fake__write_thing: needs WRITE on server 'fake' (has READ)", "fake__read_thing: needs WRITE on server 'fake' (has READ)"),
+                log(agent.getId(), Activity.TOOL_DENIED));
     }
 
     /** The client wraps the server's JSON-RPC error a couple of times; the reason is somewhere down the cause chain. */
@@ -294,7 +417,7 @@ class AgentMcpServerTests {
     void initializeCarriesTheInstructionsAndADeadServerIsSkippedNotFatal() {
         Agent agent = agents.create(OWNER, new NewAgent("lonely", "Only ever list.", OthersAccess.NONE));
         agents.updateServer(OWNER, agent.getId(), agent.getServers().get(0).getId(),
-                new UpdateMcpServer(null, "http://localhost:1/nothing", null, null, null), "");
+                new UpdateMcpServer(null, "http://127.0.0.1:1/nothing", null, null, null), "");
         try (McpSyncClient client = connect("tok-100", agent.getId())) {
             InitializeResult hello = client.getCurrentInitializationResult();
             assertEquals("Only ever list.", hello.instructions());

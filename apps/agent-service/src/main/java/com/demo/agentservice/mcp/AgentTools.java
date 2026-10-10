@@ -1,24 +1,29 @@
 package com.demo.agentservice.mcp;
 
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.agent.Access;
-import com.demo.agentservice.agent.Agent;
-import com.demo.agentservice.agent.AgentMcpServer;
+import com.demo.agentservice.agent.dto.Access;
+import com.demo.agentservice.agent.entities.Agent;
+import com.demo.agentservice.agent.entities.AgentMcpServer;
 import com.demo.agentservice.agent.AgentService;
-import com.demo.agentservice.agent.NewMcpServer;
-import com.demo.agentservice.agent.OthersAccess;
-import com.demo.agentservice.agent.UpdateAgent;
-import com.demo.agentservice.agent.UpdateMcpServer;
-import com.demo.agentservice.token.Caller;
+import com.demo.agentservice.agent.dto.NewMcpServer;
+import com.demo.agentservice.agent.dto.OthersAccess;
+import com.demo.agentservice.agent.dto.UpdateAgent;
+import com.demo.agentservice.agent.dto.UpdateMcpServer;
+import com.demo.auth.client.Caller;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import io.modelcontextprotocol.spec.McpSchema.ToolAnnotations;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static com.demo.mcp.server.Args.bad;
+import static com.demo.mcp.server.Args.number;
+import static com.demo.mcp.server.Args.string;
+import static com.demo.mcp.server.Args.strings;
+import static com.demo.mcp.server.McpEndpoint.schema;
 
 /**
  * What one agent may do to its owner's <em>other</em> agents, as tools. Three read, four write, gated by the
@@ -60,10 +65,11 @@ class AgentTools {
         }
         if (access.writes()) {
             defs.add(def("update_agent", "Change an agent's name, instructions and/or access to other agents (NONE, READ, WRITE). Fields left out are unchanged.",
-                    Map.of("id", integer(), "name", string(), "instructions", string(),
+                    Map.of("id", integer(), "name", text(), "instructions", text(),
                             "othersAccess", Map.of("type", "string", "enum", List.of("NONE", "READ", "WRITE"))), List.of("id")));
-            defs.add(def("add_mcp_server", "Attach an MCP server (Streamable HTTP URL) to an agent with READ or WRITE access.",
-                    Map.of("id", integer(), "name", string(), "url", string(), "access", accessEnum()), List.of("id", "name", "url", "access")));
+            defs.add(def("add_mcp_server", "Attach an MCP server (Streamable HTTP URL) to an agent with READ or WRITE access. On a server the deployment does not trust, READ offers only readOnlyTools.",
+                    Map.of("id", integer(), "name", text(), "url", text(), "access", accessEnum(),
+                            "readOnlyTools", Map.of("type", "array", "items", text())), List.of("id", "name", "url", "access")));
             defs.add(def("set_mcp_access", "Change an agent's access to one of its MCP servers: READ or WRITE.",
                     Map.of("id", integer(), "serverId", integer(), "access", accessEnum()), List.of("id", "serverId", "access")));
             defs.add(def("remove_mcp_server", "Detach an MCP server from an agent.",
@@ -83,7 +89,7 @@ class AgentTools {
             throw new AccessDenied("needs othersAccess " + (write ? "WRITE" : "READ") + " (has " + now + ")");
         }
         try {
-            Long id = name.equals("list_agents") ? null : id(args, "id");
+            Long id = name.equals("list_agents") ? null : number(args, "id");
             if (write && selfId.equals(id)) {
                 throw new AccessDenied("an agent cannot change its own configuration");
             }
@@ -103,16 +109,16 @@ class AgentTools {
                         new UpdateAgent(string(args, "name"), string(args, "instructions"), othersAccess(args)), by));
                 case "add_mcp_server" -> {
                     AgentMcpServer added = agents.addServer(caller, id,
-                            new NewMcpServer(string(args, "name"), string(args, "url"), null, false, access(args)), by);
+                            new NewMcpServer(string(args, "name"), string(args, "url"), null, false, access(args), strings(args, "readOnlyTools")), by);
                     yield "added server #" + added.getId() + " '" + added.getName() + "' (" + added.getAccess() + ")";
                 }
                 case "set_mcp_access" -> {
-                    AgentMcpServer changed = agents.updateServer(caller, id, id(args, "serverId"),
+                    AgentMcpServer changed = agents.updateServer(caller, id, number(args, "serverId"),
                             new UpdateMcpServer(null, null, null, null, access(args)), by);
                     yield "server '" + changed.getName() + "' is now " + changed.getAccess();
                 }
                 case "remove_mcp_server" -> {
-                    agents.removeServer(caller, id, id(args, "serverId"), by);
+                    agents.removeServer(caller, id, number(args, "serverId"), by);
                     yield "removed";
                 }
                 default -> throw new AccessDenied("no such tool: " + name);
@@ -137,7 +143,7 @@ class AgentTools {
     /** Reading tools say so in their annotation, like the built-in todo server's listing does. */
     private static Tool def(String name, String description, Map<String, Object> properties, List<String> required) {
         return Tool.builder().name(name).description(description)
-                .inputSchema(Map.of("type", "object", "properties", properties, "required", required))
+                .inputSchema(schema(properties, required))
                 .annotations(ToolAnnotations.builder().readOnlyHint(READ_TOOLS.contains(name)).build())
                 .build();
     }
@@ -146,29 +152,12 @@ class AgentTools {
         return Map.of("type", "integer");
     }
 
-    private static Map<String, Object> string() {
+    private static Map<String, Object> text() {
         return Map.of("type", "string");
     }
 
     private static Map<String, Object> accessEnum() {
         return Map.of("type", "string", "enum", List.of("READ", "WRITE"));
-    }
-
-    private static Long id(Map<String, Object> args, String key) {
-        Object value = args.get(key);
-        if (value instanceof Number n) {
-            return n.longValue();
-        }
-        try {
-            return Long.valueOf(String.valueOf(value));
-        } catch (NumberFormatException e) {
-            throw bad(key + " must be a number");
-        }
-    }
-
-    private static String string(Map<String, Object> args, String key) {
-        Object value = args.get(key);
-        return value == null ? null : String.valueOf(value);
     }
 
     private static Access access(Map<String, Object> args) {
@@ -189,10 +178,5 @@ class AgentTools {
         } catch (IllegalArgumentException e) {
             throw bad("othersAccess must be NONE, READ or WRITE");
         }
-    }
-
-    /** A malformed argument is the model's mistake, not a refusal: an error result, never a {@code tool_denied} line. */
-    private static ResponseStatusException bad(String why) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, why);
     }
 }

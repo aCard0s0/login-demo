@@ -16,12 +16,13 @@ together.
 ```
 todo/     Todo  TodoRepository  TodoService  TodoController  NewTodo  UpdateTodo  TodoResponse
 mcp/      TodoMcpServer
-token/    JwtVerifier  Revocations  Caller
 stats/    StatsController  PublicStats
 support/  TodoExceptionAdvice
 ```
 
-`todo` depends on `token` for who the caller is; `mcp` depends on both and nothing points back. `stats` is the unauthenticated corner,
+Plus `com.demo.auth.client` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`../../libs/auth-client`](../../libs/auth-client/README.md)
+module, which agent-service and account-service use too. `todo` depends on it for who the caller is; `mcp`
+depends on both and nothing points back. `stats` is the unauthenticated corner,
 kept apart so the trust boundary shows up in the tree.
 
 ## Who is asking
@@ -31,10 +32,11 @@ so a token asking for `none` or a symmetric algorithm is rejected before its sig
 claims verifier requires `sub` and `exp` -- a token with no expiry is refused outright rather than treated
 as one that never expires.
 
-What comes back is a `Caller`: an account id and a role. The role is a plain string, not an enum copied over
-from auth-service. The two services share no code on purpose, and this one only ever asks two questions of
-it -- both of which answer "no" for anything unrecognised, so an unknown role, or a token with no `role`
-claim at all, lands on least privilege instead of on a crash.
+What comes back is a `Caller`: an account id, a role and, for an agent token, the agent it is pinned to. The
+role is a plain string, not an enum copied over from auth-service -- the verifying side shares no code with
+the minting side on purpose -- and this service only ever asks two questions of it, both of which answer
+"no" for anything unrecognised, so an unknown role, or a token with no `role` claim at all, lands on least
+privilege instead of on a crash.
 
 That is the one place this service differs from auth-service: the role is read **from the token's claims**,
 not from a database row. Asking auth-service per request is exactly what the JWKS handoff exists to avoid,
@@ -46,15 +48,20 @@ next request. `auth.token-ttl` (default 30m) is that delay's upper bound.
 See the [root README](../../README.md#roles) for the matrix that spans both services. What *this* service
 enforces:
 
-| Endpoint | ADMIN | MODERATOR | AGENT | USER |
+| Endpoint | ADMIN | MODERATOR | AGENT token | USER |
 |---|---|---|---|---|
-| `GET /api/todos` | everyone's | everyone's | own | own |
-| `POST /api/todos` | own | own | own | own |
-| `PUT /api/todos/{id}` | anyone's | own, else 404 | own | own |
-| `PATCH /api/todos/{id}` | anyone's | own, else 404 | own | own |
-| `DELETE /api/todos/{id}` | anyone's | own, else 404 | own | own |
+| `GET /api/todos` | everyone's | everyone's | 403 | own |
+| `POST /api/todos` | own | own | 403 | own |
+| `PUT /api/todos/{id}` | anyone's | own, else 404 | 403 | own |
+| `PATCH /api/todos/{id}` | anyone's | own, else 404 | 403 | own |
+| `DELETE /api/todos/{id}` | anyone's | own, else 404 | 403 | own |
 
 A todo is always created for the caller whatever their role -- there is no "add this one to someone else".
+
+The REST API takes **user tokens only**. An agent token (role `AGENT`, pinned to one of the user's agents,
+good for 30 days) is 403 on every verb: its way in is `/mcp` through agent-service, where the agent's
+READ/WRITE setting is applied and every call is logged. Over REST a READ agent could `DELETE` and skip both.
+`/mcp` itself does take the agent token, because that is what agent-service forwards -- see below.
 
 `TodoRepository` has an owner-scoped query for each operation (`findByOwnerOrderByIdAsc`,
 `findByIdAndOwner`) plus the two unscoped reads the read-everyone roles need. `TodoService` is the only
@@ -74,8 +81,8 @@ sense of. For everybody else it is their own id, which tells them nothing they d
 
 ## The MCP server
 
-The same todos, reachable by an agent at `POST /mcp` (MCP Streamable HTTP, stateless). `TodoMcpServer` wires
-the SDK's servlet transport in and registers four tools, each the thin MCP face of one `TodoService` method,
+The same todos, reachable by an agent at `POST /mcp` (MCP Streamable HTTP, stateless). `TodoMcpServer` hands
+four tools to `McpEndpoint` from [`../../libs/mcp-server`](../../libs/mcp-server/README.md), each the thin MCP face of one `TodoService` method,
 so the owner rules above apply to an agent exactly as they do to the browser:
 
 | tool | `readOnlyHint` | does |
@@ -99,15 +106,16 @@ the compose network.
 
 | Method | Path | Body / notes |
 |---|---|---|
-| GET | `/api/todos` | the caller's own, or everyone's for a read-everyone role |
-| POST | `/api/todos` | `{title}` |
-| PUT | `/api/todos/{id}` | toggle done -- no body, so no read needed first |
-| PATCH | `/api/todos/{id}` | `{title?, done?}` -- only the fields sent change |
-| DELETE | `/api/todos/{id}` | |
+| GET | `/api/todos` | the caller's own, or everyone's for a read-everyone role; an agent token is 403 |
+| POST | `/api/todos` | `{title}`; an agent token is 403 |
+| PUT | `/api/todos/{id}` | toggle done -- no body, so no read needed first; an agent token is 403 |
+| PATCH | `/api/todos/{id}` | `{title?, done?}` -- only the fields sent change; an agent token is 403 |
+| DELETE | `/api/todos/{id}` | an agent token is 403 |
 | GET | `/api/public/todos/stats` | `{todos}` -- no token |
-| POST | `/mcp` | MCP Streamable HTTP, see above -- compose network only |
+| POST | `/mcp` | MCP Streamable HTTP, see above -- compose network only; the one place an agent token is good |
 
-Everything except the public count needs `Authorization: Bearer <token>`. A null field in a PATCH means "leave it
+Everything except the public count needs `Authorization: Bearer <token>`, and under `/api` it must be a
+user's own. A null field in a PATCH means "leave it
 alone", so renaming a todo cannot flip its done flag by omitting it. Every rejection comes back as
 `{"error": "..."}` in the same shape auth-service uses, which `TodoExceptionAdvice` is responsible for.
 
@@ -128,8 +136,8 @@ docker compose up -d db                  # it still needs a database
 ./mvnw -pl apps/todo-service test        # SQLite backed: needs nothing running
 ```
 
-Tests: `TodoServiceTests` for the ownership and role rules, `JwtVerifierTests` for the token check -- the
-only thing standing between a stranger and somebody's todo list, so it runs against a real throwaway JWKS
-server rather than a mock -- and `TodoMcpServerTests`, which drives `/mcp` with the real MCP client over real
+Tests: `TodoServiceTests` for the ownership and role rules, `ApiContractTests` for the 401 and the 403 an
+agent token gets on every verb -- the token check itself is tested once, in `../../libs/auth-client` -- and
+`TodoMcpServerTests`, which drives `/mcp` with the real MCP client over real
 HTTP: the annotation on `list_todos` and on nothing else, two callers who cannot see each other's todos, and
 a missing token answered with an error result.

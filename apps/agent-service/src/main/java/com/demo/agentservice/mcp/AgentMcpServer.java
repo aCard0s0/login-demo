@@ -2,10 +2,11 @@ package com.demo.agentservice.mcp;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.agent.Agent;
+import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.AgentService;
-import com.demo.agentservice.token.Caller;
-import com.demo.agentservice.token.JwtVerifier;
+import com.demo.agentservice.agent.ServerUrls;
+import com.demo.auth.client.Caller;
+import com.demo.auth.client.JwtVerifier;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.json.McpJsonDefaults;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -24,6 +25,7 @@ import io.modelcontextprotocol.spec.McpSchema.JSONRPCResponse;
 import io.modelcontextprotocol.spec.McpSchema.JSONRPCResponse.JSONRPCError;
 import io.modelcontextprotocol.spec.McpSchema.ListToolsResult;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,14 +62,14 @@ public class AgentMcpServer {
     static final String AGENT = "agent";
 
     @Bean
-    ServletRegistrationBean<HttpServletStatelessServerTransport> agentMcpServlet(AgentService agents, ActivityLog activity, JwtVerifier jwt) {
+    ServletRegistrationBean<HttpServletStatelessServerTransport> agentMcpServlet(AgentService agents, ActivityLog activity, JwtVerifier jwt, ServerUrls urls) {
         HttpServletStatelessServerTransport transport = HttpServletStatelessServerTransport.builder()
                 .messageEndpoint("/mcp")
                 .contextExtractor(request -> McpTransportContext.create(Map.of(
                         AUTHORIZATION, Objects.requireNonNullElse(request.getHeader("Authorization"), ""),
                         AGENT, Objects.requireNonNullElse(request.getParameter(AGENT), ""))))
                 .build();
-        transport.setMcpHandler(new Handler(transport.protocolVersions(), agents, activity, jwt));
+        transport.setMcpHandler(new Handler(transport.protocolVersions(), agents, activity, jwt, urls));
         ServletRegistrationBean<HttpServletStatelessServerTransport> servlet = new ServletRegistrationBean<>(transport, "/mcp");
         servlet.setName("agent-mcp");
         servlet.setAsyncSupported(true);
@@ -86,12 +88,14 @@ public class AgentMcpServer {
         private final AgentService agents;
         private final ActivityLog activity;
         private final JwtVerifier jwt;
+        private final ServerUrls urls;
 
-        Handler(List<String> protocolVersions, AgentService agents, ActivityLog activity, JwtVerifier jwt) {
+        Handler(List<String> protocolVersions, AgentService agents, ActivityLog activity, JwtVerifier jwt, ServerUrls urls) {
             this.protocolVersions = protocolVersions;
             this.agents = agents;
             this.activity = activity;
             this.jwt = jwt;
+            this.urls = urls;
         }
 
         @Override
@@ -164,7 +168,7 @@ public class AgentMcpServer {
         private List<Tool> tools(Session s) {
             AgentTools builtins = new AgentTools(s.caller(), s.agent(), agents, activity);
             return Stream.concat(builtins.defs(s.agent().getOthersAccess()).stream(),
-                    McpTools.list(s.agent(), s.bearer(), activity).stream()).toList();
+                    McpTools.list(s.agent(), s.bearer(), activity, urls).stream()).toList();
         }
 
         /** Runs one tool -- or refuses it -- and says what happened in the agent's log either way. */
@@ -174,9 +178,9 @@ public class AgentMcpServer {
             AgentTools builtins = new AgentTools(s.caller(), s.agent(), agents, activity);
             ToolResult result;
             try {
-                result = builtins.has(in.name()) ? builtins.call(in.name(), args) : McpTools.call(s.agent(), s.bearer(), in.name(), args);
+                result = builtins.has(in.name()) ? builtins.call(in.name(), args) : McpTools.call(s.agent(), s.bearer(), in.name(), args, urls);
                 activity.record(s.agent().getId(), Activity.TOOL_CALL,
-                        what + (result.error() ? " -> error: " : " -> ok: ") + ActivityLog.brief(result.text()));
+                        what + (result.error() ? " -> error: " : " -> ok: ") + ActivityLog.brief(result.summary()));
             } catch (AccessDenied denied) {
                 activity.record(s.agent().getId(), Activity.TOOL_DENIED, in.name() + ": " + denied.getMessage());
                 result = ToolResult.error("denied: " + denied.getMessage());
@@ -185,10 +189,13 @@ public class AgentMcpServer {
                 activity.record(s.agent().getId(), Activity.TOOL_CALL, what + " -> error: " + ActivityLog.brief(e.getMessage()));
                 result = ToolResult.error("error: the tool call failed; the agent's activity log has the detail");
             }
-            return CallToolResult.builder()
-                    .addTextContent(result.text().isEmpty() ? "(empty)" : result.text())
-                    .isError(result.error())
-                    .build();
+            CallToolResult.Builder out = CallToolResult.builder()
+                    .content(result.content().isEmpty() ? List.of(new TextContent("(empty)")) : result.content())
+                    .isError(result.error());
+            if (result.structuredContent() != null) {   // the builder refuses a null; absent is simply absent
+                out.structuredContent(result.structuredContent());
+            }
+            return out.build();
         }
     }
 }

@@ -28,6 +28,9 @@ class AccountServiceTests {
     @Autowired
     AccountRepository accounts;
 
+    @Autowired
+    AgentTokenVersionRepository agentVersions;
+
     @Test
     void registerHashesThePasswordAndMakesAPlainUser() {
         Account created = auth.register("Ada", "ada@example.com", "correct-horse");
@@ -123,7 +126,7 @@ class AccountServiceTests {
     void tokensStopVerifyingOnceTheyHaveExpired() throws Exception {
         // A negative lifetime makes every token already expired, so the test does not have to wait.
         Tokens expired = new Tokens(Duration.ofSeconds(-1));
-        AccountService stale = new AccountService(accounts, expired);
+        AccountService stale = new AccountService(accounts, agentVersions, expired);
         Account edsger = stale.register("Edsger", "edsger@example.com", "dijkstra-1930");
         // The same Tokens that signed it does the checking, so only the expiry can be what rejects it.
         String token = expired.issue(edsger.getId(), edsger.getEmail(), edsger.getName(), edsger.getRole().name(), 0);
@@ -136,7 +139,7 @@ class AccountServiceTests {
         Account barbara = auth.register("Barbara", "barbara@example.com", "liskov-1939");
         String token = auth.issue(barbara);
 
-        AccountService other = new AccountService(accounts, new Tokens(Duration.ofMinutes(30)));
+        AccountService other = new AccountService(accounts, agentVersions, new Tokens(Duration.ofMinutes(30)));
         assertTrue(other.byToken(token).isEmpty(), "a different keypair must not accept this token");
     }
 
@@ -166,7 +169,7 @@ class AccountServiceTests {
         Account revoked = auth.revokeTokens(linus.getId());
         assertTrue(auth.byToken(first).isEmpty());
         assertTrue(auth.byToken(second).isEmpty());
-        assertEquals(revoked.getTokenVersion(), auth.tokenVersions().get(linus.getId()),
+        assertEquals(revoked.getTokenVersion(), auth.tokenVersions().get(String.valueOf(linus.getId())),
                 "todo-service learns the new version from this map");
         assertTrue(auth.byToken(auth.issue(revoked)).isPresent(), "logging back in still works");
     }

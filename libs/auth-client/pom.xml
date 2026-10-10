@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.demo</groupId>
+        <artifactId>login-demo</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>auth-client</artifactId>
+    <name>auth-client</name>
+    <description>Verifying auth-service's tokens in process: the one copy todo-, agent- and account-service share</description>
+
+    <dependencies>
+        <!-- The same starter the services use: RestClient plus Jackson for the revocation feed, and
+             ResponseStatusException for the 401. With spring-web alone RestClient has no JSON converter, the
+             feed cannot be decoded and Revocations fails open, silently: the test here is what caught that. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+    </dependencies>
+
+    <!-- A plain jar: no spring-boot-maven-plugin, so it is never repackaged as an application. -->
+</project>

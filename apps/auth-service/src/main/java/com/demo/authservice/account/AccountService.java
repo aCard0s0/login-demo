@@ -12,11 +12,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /** The account itself: who exists, what their details are, and which account a caller's token names. */
 @Service
@@ -44,10 +44,13 @@ public class AccountService {
 
     private final AccountRepository accounts;
 
+    private final AgentTokenVersionRepository agentVersions;
+
     private final Tokens tokens;
 
-    public AccountService(AccountRepository accounts, Tokens tokens) {
+    public AccountService(AccountRepository accounts, AgentTokenVersionRepository agentVersions, Tokens tokens) {
         this.accounts = accounts;
+        this.agentVersions = agentVersions;
         this.tokens = tokens;
     }
 
@@ -120,10 +123,19 @@ public class AccountService {
      * Resolves a token to the account it names, or empty if it does not check out. The account is re-read rather
      * than taken from the token's claims, so a rename shows up straight away instead of at the next login, and
      * a suspension or a revocation bites on the very next request.
+     *
+     * <p>An agent token is 403, not an account: its only way in is {@code /mcp} through agent-service, and here
+     * it could edit its owner's email and password. Judged after validity, so a dead one is still a plain 401.
      */
     public Optional<Account> byToken(String token) {
         return tokens.claimsFrom(token).flatMap(claims -> accounts.findById(claims.accountId())
-                .filter(account -> !account.isSuspended() && account.getTokenVersion() == claims.version()));
+                .filter(account -> !account.isSuspended() && account.getTokenVersion() == claims.version())
+                .map(account -> {
+                    if (claims.agent()) {
+                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "an agent token can only connect to /mcp");
+                    }
+                    return account;
+                }));
     }
 
     /** A token for the account, stamped with its current version so a later revocation can kill it. */
@@ -135,7 +147,7 @@ public class AccountService {
     /**
      * A long-lived token one of the account's agents connects to agent-service with. agent-service asks for it
      * on the owner's behalf over the compose network; the token names the owner and the one agent, and dies
-     * with the owner's other tokens on revoke or suspend.
+     * with the owner's other tokens on revoke or suspend -- or alone, on {@link #revokeAgentTokens}.
      */
     public String issueAgentToken(Long accountId, Long agentId) {
         if (agentId == null) {
@@ -143,7 +155,19 @@ public class AccountService {
         }
         Account account = accounts.findById(accountId == null ? -1 : accountId).filter(a -> !a.isSuspended())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "account not found"));
-        return tokens.issueForAgent(account.getId(), account.getEmail(), account.getName(), account.getTokenVersion(), agentId);
+        int agentVersion = agentVersions.findById(agentId).map(AgentTokenVersion::getVersion).orElse(0);
+        return tokens.issueForAgent(account.getId(), account.getEmail(), account.getName(), account.getTokenVersion(), agentId, agentVersion);
+    }
+
+    /**
+     * Kills every token minted for one agent, and nothing else: the owner's login and their other agents' tokens
+     * live on. agent-service asks, after checking the caller owns the agent; this side only counts.
+     */
+    @Transactional
+    public int revokeAgentTokens(Long agentId) {
+        AgentTokenVersion version = agentVersions.findById(agentId).orElseGet(() -> new AgentTokenVersion(agentId));
+        version.setVersion(version.getVersion() + 1);
+        return agentVersions.save(version).getVersion();
     }
 
     /** How many accounts exist. Public: a count gives away nothing about who they are. */
@@ -202,10 +226,15 @@ public class AccountService {
         return accounts.save(account);
     }
 
-    /** Every account that has had its tokens revoked, by id, with the version a token must carry to count. */
-    public Map<Long, Integer> tokenVersions() {
-        return accounts.findByTokenVersionGreaterThan(0).stream()
-                .collect(Collectors.toMap(Account::getId, Account::getTokenVersion));
+    /**
+     * Every account that has had its tokens revoked, by id, with the version a token must carry to count -- and
+     * every agent likewise, under {@code agent:<id>}, so the two kinds of key can never collide in one map.
+     */
+    public Map<String, Integer> tokenVersions() {
+        Map<String, Integer> all = new HashMap<>();
+        accounts.findByTokenVersionGreaterThan(0).forEach(a -> all.put(String.valueOf(a.getId()), a.getTokenVersion()));
+        agentVersions.findByVersionGreaterThan(0).forEach(v -> all.put("agent:" + v.getAgentId(), v.getVersion()));
+        return all;
     }
 
     /**

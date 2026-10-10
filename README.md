@@ -12,6 +12,9 @@ compose.yaml            db + the five services
 Dockerfile              one file, one build, five runtime stages
 docker/initdb.sql       one database and one role per service
 .env.example            the admin credentials and OAuth client secrets compose reads from .env
+libs/auth-client        verifying those tokens: the one copy the three services below share
+libs/web-errors         the {error} body every service answers a rejection with
+libs/mcp-server         the stateless /mcp endpoint and tool-argument parsing
 apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
 apps/todo-service       per-account todos, and their MCP server  :9082
 apps/agent-service      agents, their MCP servers, permissions   :9083
@@ -28,6 +31,9 @@ Each service documents itself:
 | agent-service | agents as MCP servers: the servers each may use, READ/WRITE enforced per tool call | [apps/agent-service](apps/agent-service/README.md) |
 | account-service | money accounts for users and their agents, transfers, READ/WRITE grants per agent, and its `/mcp` | [apps/account-service](apps/account-service/README.md) |
 | web | the pages and the one-origin proxy | [apps/web](apps/web/README.md) |
+| auth-client | `JwtVerifier`, `Revocations` and `Caller`: a plain jar, no service, that todo-, agent- and account-service depend on | [libs/auth-client](libs/auth-client/README.md) |
+| web-errors | `ErrorBodyAdvice`: every rejection, MVC's own included, as `{"error": "..."}`; all four services extend it | [libs/web-errors](libs/web-errors/README.md) |
+| mcp-server | `McpEndpoint` and `Args`: the `/mcp` servlet todo- and account-service serve their tools through, and exact argument parsing agent-service shares too | [libs/mcp-server](libs/mcp-server/README.md) |
 
 ## Package convention
 
@@ -39,10 +45,12 @@ Two rules hold across all of them:
 
 - **The arrows point one way.** `token` knows nothing about accounts (it signs an id, an email, a name and a
   role -- not an `Account`), `account` uses `token` to resolve a caller, and `session` uses both to turn a
-  password into one.
+  password into one. The verifying half of `token` lives once, in the `libs/auth-client` library, and the three
+  services that check tokens in process depend on it rather than carrying a copy each.
 - **`stats` is the unauthenticated corner** of each service, kept apart so the trust boundary is visible in
   the tree rather than buried in a comment, and **`support`** holds the one cross-cutting piece each service
-  has: the advice that renders every rejection as `{"error": "..."}`.
+  has: the advice that renders every rejection as `{"error": "..."}`. It extends `ErrorBodyAdvice` from
+  `libs/web-errors` and adds only that service's domain rejections.
 
 ## Run
 
@@ -150,20 +158,27 @@ Endpoint by endpoint:
 
 | Service | Endpoint | ADMIN | MODERATOR | AGENT | USER |
 |---|---|---|---|---|---|
-| auth | `GET`/`PUT /api/accounts/me` | own | own | own | own |
+| auth | `GET`/`PUT /api/accounts/me` | own | own | 403 | own |
 | auth | `GET /api/accounts` | everyone | everyone | 403 | 403 |
 | auth | `PUT /api/accounts/{id}/role` | any account | 403 | 403 | 403 |
 | auth | `PUT /api/accounts/{id}/suspended` · `POST /api/accounts/{id}/revoke` | any account | 403 | 403 | 403 |
-| todo | `GET /api/todos` | everyone's | everyone's | own | own |
-| todo | `POST /api/todos` | own | own | own | own |
-| todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | own | own |
-| agent | everything under `/api/agents` | own | own | own | own |
+| todo | `GET /api/todos` | everyone's | everyone's | 403; over MCP its owner's | own |
+| todo | `POST /api/todos` | own | own | 403; over MCP its owner's, if WRITE | own |
+| todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | 403; over MCP its owner's, if WRITE | own |
+| agent | everything under `/api/agents` | own | own | 403 | own |
 | account | `GET /api/bank/accounts` · `GET .../{id}` · `GET .../{id}/transfers` | everyone's | everyone's | 403; over MCP its own + granted | own + its agents' |
 | account | `POST /api/bank/accounts/{id}/transfers` | anyone's | own, else 404 | 403; over MCP its own + WRITE grants | own + its agents' |
 | account | `POST /api/bank/accounts` · `.../deposit` · `PUT`/`DELETE .../permissions/{agentId}` | anyone's | own, else 404 | 403 | own + its agents' |
 
 A todo -- or an agent -- belonging to someone else comes back **404, not 403**, so neither answer says whether
 it exists. Agents are the one thing no role sees across accounts, an admin included.
+
+**An agent token is 403 on every `/api` endpoint, in every service.** Its only way in is `/mcp` through
+agent-service, where the agent's READ/WRITE setting and activity log apply; over REST a READ agent could
+delete a todo with its 30-day token, or change its owner's password, and skip both. The MCP endpoints of
+todo-service and account-service are the one place an agent token is good, and only agent-service reaches
+them. The endpoints that take no token at all -- registration, login, the OAuth redirects, `/api/public/*`,
+`/api/jwks.json` -- are unaffected, since there is no token to refuse.
 
 Registration always produces a `USER` -- `POST /api/accounts` has no role field to ask with, and
 `PUT /api/accounts/me` cannot change one. `PUT /api/accounts/{id}/role` is the single door off `USER`, and
@@ -185,10 +200,16 @@ token it holds dies, until it is reactivated) or **revoke its access** (every to
 log straight back in). An admin cannot suspend itself.
 
 Both work through a per-account token version, stamped into every token as `ver` and bumped on revoke or
-suspend. auth-service compares it on every request, so both bite there at once. todo-service polls
-`/internal/token-versions` at most every 10 seconds and turns away any token older than the account's last
-revocation. That path is outside `/api`, so the web proxy never forwards it; if auth-service is unreachable
-todo-service keeps the last list it had.
+suspend. auth-service compares it on every request, so both bite there at once. todo-, agent- and
+account-service poll `/internal/token-versions` at most every 10 seconds and turn away any token older than
+the account's last revocation. That path is outside `/api`, so the web proxy never forwards it; if
+auth-service is unreachable they keep the last list they had.
+
+An owner can also revoke **one agent's tokens** alone, with **Revoke tokens** on the agent's page
+(`POST /api/agents/{id}/token/revoke`). That bumps a per-agent version auth-service keeps and stamps into
+agent tokens as `agentVer`; the same feed publishes it under `agent:<id>`, so an agent key can never collide
+with an account id. The owner's login and their other agents are untouched. An agent token minted before
+`agentVer` existed is refused outright, since it cannot be told from a revoked one.
 
 An admin changing *another* account's name, email or password is deliberately not implemented: editing an
 account requires its current password, and bypassing that would be account takeover rather than
@@ -198,7 +219,8 @@ administration.
 
 Seeded into auth-service's database at startup from `ADMIN_EMAIL` and `ADMIN_PASSWORD`, which compose reads
 from `.env`. `.env` is gitignored; `.env.example` is the committed stand-in. Compose refuses to start the
-stack if either value is missing, rather than coming up with nobody in charge.
+stack if either value is missing, rather than coming up with nobody in charge -- and likewise without
+`INTERNAL_SECRET` and `AUTH_HEADER_KEY`, the two secrets agent-service needs.
 
 Seeding is **create-only**: an address that already exists is promoted to `ADMIN`, but its password is left
 exactly as it is, so a restart cannot quietly reset a password the admin has since changed and a stale
@@ -221,11 +243,15 @@ claude mcp add --transport http todos "http://localhost:3000/mcp?agent=<id>" --h
 
 The token is either the owner's own login token (30 minutes) or one made with **Create token** on the
 agent's page: minted by auth-service with role `AGENT`, the owner as subject and the agent pinned by claim,
-good for 30 days, shown once, and killed with the owner's other tokens by **Revoke access**.
+good for 30 days, shown once, and killed early by **Revoke tokens** on that page (this agent's alone) or by
+**Revoke access** on the account (every token the owner holds).
 Step by step, for Claude Code, Cursor, VS Code and plain curl: [docs/connect-an-agent.md](docs/connect-an-agent.md).
 
-The permission is the service's, not the connecting agent's. **READ** offers only the tools a server
-annotates `readOnlyHint: true` and refuses any other; **WRITE** offers them all. Every tool call is checked
+The permission is the service's, not the connecting agent's. **READ** offers only the tools that only read
+and refuses any other; **WRITE** offers them all. Which tools only read is the server's own `readOnlyHint`
+for the servers the deployment trusts (`AGENTS_TRUSTED_SERVER_URLS`, and the built-in todo one) and, for
+any other server an owner adds, exactly the tools the owner lists as read-only on that server row -- a
+server an owner typed in can annotate anything it likes, so its word is not taken. Every tool call is checked
 again by agent-service against the row as it is saved *at that moment*, so flipping a server from WRITE to
 READ on the page while an agent is connected is obeyed from its next call. What ran and what was refused is in
 the agent's activity log on the same page.
@@ -233,11 +259,18 @@ the agent's activity log on the same page.
 Every new agent starts with the built-in **todos** server as READ: todo-service exposes its todos over MCP at
 `/mcp`, with `list_todos` read-only and `add_todo`, `update_todo`, `delete_todo` not. The agent acts **as its
 owner** -- the token it connected with is forwarded to that server -- so it can only ever see the owner's
-todos. Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header.
+todos. Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header, which
+is encrypted at rest with `AUTH_HEADER_KEY` from `.env` (required, like the admin credentials).
 
 An agent reads or changes the owner's other agents only when its **other agents** setting says READ or WRITE,
-through built-in tools scoped to the same owner; it can never change its own setup. Details, the activity
-kinds and the deliberate limitations (it will POST to any URL an owner types) are in the
+through built-in tools scoped to the same owner; it can never change its own setup.
+
+A server URL an owner types is checked before it is saved and again before every connection: the
+deployment's own servers (`AGENTS_TRUSTED_SERVER_URLS`, and the built-in todo one) pass by name, and any
+other must resolve to a public address -- nothing loopback, private, link-local (the cloud metadata address
+lives there), carrier-grade NAT or multicast, and no bare compose service name -- so agent-service cannot be
+pointed at the database or auth-service's `/internal` endpoints from inside its own network. Redirects are
+not followed. Details, the activity kinds and the deliberate limitations are in the
 [agent-service README](apps/agent-service/README.md).
 
 ## Signing in with Google or GitHub
@@ -286,25 +319,27 @@ The consequences worth knowing:
 |---|---|---|---|
 | auth | POST | `/api/accounts` | no -- this is registration |
 | auth | POST | `/api/login` | no |
-| auth | GET · PUT | `/api/accounts/me` | yes |
+| auth | GET · PUT | `/api/accounts/me` | yes -- user tokens only; an agent token is 403 on all of `/api/accounts` |
 | auth | GET | `/api/accounts` | yes -- admin and moderator only |
 | auth | PUT | `/api/accounts/{id}/role` | yes -- admin only |
 | auth | PUT | `/api/accounts/{id}/suspended` | yes -- admin only |
 | auth | POST | `/api/accounts/{id}/revoke` | yes -- admin only |
-| auth | GET | `/internal/token-versions` | no -- compose network only, never proxied |
+| auth | GET | `/internal/token-versions` | no -- compose network only, never proxied; accounts by id, agents as `agent:<id>` |
+| auth | POST | `/internal/agent-tokens` · `/internal/agent-tokens/{agentId}/revoke` | `X-Internal-Secret` -- compose network only, never proxied; agent-service asks |
 | auth | GET | `/api/oauth/providers` | no |
 | auth | GET | `/api/oauth/{provider}/start` · `/callback` | no -- 302s the browser walks through |
 | auth | GET | `/api/public/stats` | no |
 | auth | GET | `/api/jwks.json` | no |
-| todo | GET · POST | `/api/todos` | yes |
-| todo | PUT · PATCH · DELETE | `/api/todos/{id}` | yes |
+| todo | GET · POST | `/api/todos` | yes -- user tokens only; an agent token is 403 on all of `/api/todos` |
+| todo | PUT · PATCH · DELETE | `/api/todos/{id}` | yes -- user tokens only |
 | todo | GET | `/api/public/todos/stats` | no |
-| todo | POST | `/mcp` | yes -- MCP, compose network only, never proxied |
-| agent | GET · POST | `/api/agents` | yes |
+| todo | POST | `/mcp` | yes -- MCP, agent or login token as forwarded by agent-service, compose network only, never proxied |
+| agent | GET · POST | `/api/agents` | yes -- user tokens only; an agent token is 403 on all of `/api/agents` |
 | agent | GET · PATCH · DELETE | `/api/agents/{id}` | yes -- owner only |
 | agent | POST | `/api/agents/{id}/servers` · `PATCH`/`DELETE .../servers/{sid}` | yes -- owner only |
 | agent | GET | `/api/agents/{id}/activity` | yes -- owner only |
 | agent | POST | `/api/agents/{id}/token` | yes -- owner only; a 30-day token for connecting as this agent |
+| agent | POST | `/api/agents/{id}/token/revoke` | yes -- owner only; kills every token made for this one agent |
 | agent | POST | `/mcp?agent={id}` | yes -- MCP; owner's token or the agent's own; proxied |
 | agent | GET | `/api/public/agents/stats` | no |
 | account | GET · POST | `/api/bank/accounts` | yes -- user tokens only; an agent token is 403 on all of `/api/bank` |
@@ -332,6 +367,7 @@ Ports 9081-9084 rather than 8081-8084: Docker holds those on this machine. Overr
 point the frontend elsewhere with `AUTH_URL` / `TODO_URL` / `AGENT_URL` / `ACCOUNT_URL`. todo-service,
 agent-service and account-service find the signing key through `auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations
 through `auth.token-versions-uri` (`AUTH_TOKEN_VERSIONS_URI`); agent-service finds the built-in todo MCP
-server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`) and the token minter through
+server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`), the other servers it may reach by compose name
+through `agents.trusted-server-urls` (`AGENTS_TRUSTED_SERVER_URLS`) and the token minter through
 `auth.agent-tokens-uri` (`AUTH_AGENT_TOKENS_URI`); and all four services take
 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` from the environment.

@@ -1,10 +1,10 @@
 package com.demo.agentservice;
 
 import com.demo.agentservice.agent.AgentService;
-import com.demo.agentservice.agent.NewAgent;
+import com.demo.agentservice.agent.dto.NewAgent;
 import com.demo.agentservice.token.AgentTokens;
-import com.demo.agentservice.token.Caller;
-import com.demo.agentservice.token.JwtVerifier;
+import com.demo.auth.client.Caller;
+import com.demo.auth.client.JwtVerifier;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,6 +18,8 @@ import org.springframework.web.server.ResponseStatusException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -60,7 +62,9 @@ class ApiContractTests {
         mvc.perform(get("/api/agents").header("Authorization", "Bearer one")).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].name").value("hers"))
                 .andExpect(jsonPath("$[0].servers[0].name").value("todos"))
-                .andExpect(jsonPath("$[0].servers[0].hasAuthHeader").value(false));
+                .andExpect(jsonPath("$[0].servers[0].hasAuthHeader").value(false))
+                .andExpect(jsonPath("$[0].servers[0].trusted").value(true))
+                .andExpect(jsonPath("$[0].servers[0].readOnlyTools").isEmpty());
         // Even an admin: agents are strictly the owner's.
         mvc.perform(get("/api/agents/" + hers).header("Authorization", "Bearer two")).andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("no such agent"));
@@ -73,6 +77,13 @@ class ApiContractTests {
         mvc.perform(get("/api/agents/" + hers + "/activity").header("Authorization", "Bearer one")).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].kind").value("config_changed"))
                 .andExpect(jsonPath("$[0].detail").value("agent token issued"));
+        // Revoking is the owner's alone too, goes to auth-service for this one agent, and is in the log.
+        mvc.perform(post("/api/agents/" + hers + "/token/revoke").header("Authorization", "Bearer two")).andExpect(status().isNotFound());
+        verify(tokens, never()).revoke(any());
+        mvc.perform(post("/api/agents/" + hers + "/token/revoke").header("Authorization", "Bearer one")).andExpect(status().isOk());
+        verify(tokens).revoke(hers);
+        mvc.perform(get("/api/agents/" + hers + "/activity").header("Authorization", "Bearer one")).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].detail").value("agent tokens revoked"));
         mvc.perform(get("/api/public/agents/stats")).andExpect(status().isOk()).andExpect(jsonPath("$.agents").isNumber());
     }
 
@@ -89,6 +100,8 @@ class ApiContractTests {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"access\":\"WRITE\"}"))
                 .andExpect(status().isForbidden());
         mvc.perform(post("/api/agents/" + mine + "/token").header("Authorization", "Bearer agent")).andExpect(status().isForbidden());
+        mvc.perform(post("/api/agents/" + mine + "/token/revoke").header("Authorization", "Bearer agent")).andExpect(status().isForbidden());
+        verify(tokens, never()).revoke(any());
         assertEquals("READ", agents.get(new Caller("3", "USER"), mine).getServers().get(0).getAccess().name(), "nothing it tried may have stuck");
     }
 }

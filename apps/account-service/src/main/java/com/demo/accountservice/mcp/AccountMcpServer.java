@@ -1,16 +1,13 @@
 package com.demo.accountservice.mcp;
 
-import com.demo.accountservice.account.entities.Account;
 import com.demo.accountservice.account.AccountService;
+import com.demo.accountservice.account.entities.Account;
 import com.demo.accountservice.account.entities.Transfer;
-import com.demo.accountservice.token.Caller;
-import com.demo.accountservice.token.JwtVerifier;
-import io.modelcontextprotocol.common.McpTransportContext;
-import io.modelcontextprotocol.server.McpServer;
+import com.demo.auth.client.Caller;
+import com.demo.auth.client.JwtVerifier;
+import com.demo.mcp.server.McpEndpoint;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport;
-import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import io.modelcontextprotocol.spec.McpSchema.ToolAnnotations;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
@@ -19,12 +16,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static com.demo.mcp.server.Args.number;
+import static com.demo.mcp.server.McpEndpoint.schema;
+import static com.demo.mcp.server.McpEndpoint.tool;
 
 /**
  * The same accounts, reachable by an agent over MCP at {@code /mcp}. Three tools, each the thin MCP face of
@@ -38,32 +37,28 @@ import java.util.stream.Collectors;
  * Only the two reading tools declare themselves read-only; that annotation is what agent-service's READ
  * permission keys on, so leaving it off {@code transfer} is the one thing this class must never do.
  *
- * <p>Stateless, and outside {@code /api}, so the web proxy never forwards it; only agent-service reaches it.
+ * <p>The endpoint itself -- stateless, outside {@code /api} -- is {@link McpEndpoint}'s.
  */
 @Configuration
 public class AccountMcpServer {
 
-    static final String AUTHORIZATION = "authorization";
-
     @Bean
     ServletRegistrationBean<HttpServletStatelessServerTransport> mcpServlet(AccountService accounts, JwtVerifier jwt) {
-        HttpServletStatelessServerTransport transport = HttpServletStatelessServerTransport.builder()
-                .messageEndpoint("/mcp")
-                .contextExtractor(request -> McpTransportContext.create(
-                        Map.of(AUTHORIZATION, Objects.requireNonNullElse(request.getHeader("Authorization"), ""))))
-                .build();
-        McpServer.sync(transport)
-                .serverInfo("account-service", "0.0.1")
-                .capabilities(ServerCapabilities.builder().tools(false).build())
-                .tools(tools(accounts, jwt))
-                .build();
-        ServletRegistrationBean<HttpServletStatelessServerTransport> servlet = new ServletRegistrationBean<>(transport, "/mcp");
-        servlet.setName("mcp");
-        servlet.setAsyncSupported(true);
-        return servlet;
+        return McpEndpoint.servlet("account-service", tools(accounts, authorization -> agentOnly(jwt.callerOf(authorization))));
     }
 
-    private static List<SyncToolSpecification> tools(AccountService accounts, JwtVerifier jwt) {
+    /**
+     * agent-service forwards whatever token the client connected with. The owner's login token would give an
+     * agent the owner's whole reach here, so only an agent token is served.
+     */
+    private static Caller agentOnly(Caller caller) {
+        if (!caller.isAgent()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "connect with the agent's own token, not a login token");
+        }
+        return caller;
+    }
+
+    private static List<SyncToolSpecification> tools(AccountService accounts, Function<String, Caller> callerOf) {
         return List.of(
                 tool(Tool.builder()
                                 .name("list_accounts")
@@ -71,7 +66,7 @@ public class AccountMcpServer {
                                 .inputSchema(schema(Map.of(), List.of()))
                                 .annotations(ToolAnnotations.builder().readOnlyHint(true).build())
                                 .build(),
-                        jwt, (caller, args) -> {
+                        callerOf, (caller, args) -> {
                             List<Account> mine = accounts.list(caller);
                             return mine.isEmpty() ? "no accounts"
                                     : mine.stream().map(AccountMcpServer::line).collect(Collectors.joining("\n"));
@@ -82,7 +77,7 @@ public class AccountMcpServer {
                                 .inputSchema(schema(Map.of("account", Map.of("type", "integer")), List.of("account")))
                                 .annotations(ToolAnnotations.builder().readOnlyHint(true).build())
                                 .build(),
-                        jwt, (caller, args) -> {
+                        callerOf, (caller, args) -> {
                             List<Transfer> all = accounts.transfers(caller, number(args, "account"));
                             return all.isEmpty() ? "no transfers"
                                     : all.stream().map(AccountMcpServer::line).collect(Collectors.joining("\n"));
@@ -95,35 +90,8 @@ public class AccountMcpServer {
                                         "to", Map.of("type", "integer"),
                                         "amount", Map.of("type", "integer")), List.of("from", "to", "amount")))
                                 .build(),
-                        jwt, (caller, args) -> line(accounts.transfer(caller,
+                        callerOf, (caller, args) -> line(accounts.transfer(caller,
                                 number(args, "from"), number(args, "to"), number(args, "amount")))));
-    }
-
-    /** One tool: resolve the caller from the request's token, run the action, and render any refusal as an error result. */
-    private static SyncToolSpecification tool(Tool tool, JwtVerifier jwt,
-                                              BiFunction<Caller, Map<String, Object>, String> action) {
-        return SyncToolSpecification.builder()
-                .tool(tool)
-                .callHandler((context, request) -> {
-                    try {
-                        Caller caller = jwt.callerOf((String) context.get(AUTHORIZATION));
-                        // agent-service forwards whatever token the client connected with. The owner's login token
-                        // would give an agent the owner's whole reach here, so only an agent token is served.
-                        if (!caller.isAgent()) {
-                            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "connect with the agent's own token, not a login token");
-                        }
-                        Map<String, Object> args = request.arguments() == null ? Map.of() : request.arguments();
-                        return CallToolResult.builder().addTextContent(action.apply(caller, args)).build();
-                    } catch (ResponseStatusException e) {
-                        String reason = e.getReason() == null ? e.getStatusCode().toString() : e.getReason();
-                        return CallToolResult.builder().isError(true).addTextContent(reason).build();
-                    }
-                })
-                .build();
-    }
-
-    private static Map<String, Object> schema(Map<String, Object> properties, List<String> required) {
-        return Map.of("type", "object", "properties", properties, "required", required);
     }
 
     private static String line(Account a) {
@@ -134,17 +102,5 @@ public class AccountMcpServer {
     private static String line(Transfer t) {
         return "#" + t.getId() + " " + (t.getFromAccount() == null ? "-" : "#" + t.getFromAccount())
                 + " -> #" + t.getToAccount() + " " + t.getAmount() + " (" + t.getBy() + ")";
-    }
-
-    /**
-     * A whole number that fits a long. 40.9 cents is refused rather than silently becoming 40, 5.7 is not account 5,
-     * and 2^64+5 is not account 5 either: exact, or an error.
-     */
-    private static Long number(Map<String, Object> args, String key) {
-        try {
-            return new BigDecimal(String.valueOf(args.get(key))).longValueExact();
-        } catch (NumberFormatException | ArithmeticException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, key + " must be a whole number");
-        }
     }
 }

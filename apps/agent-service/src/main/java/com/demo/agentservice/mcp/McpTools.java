@@ -2,25 +2,25 @@ package com.demo.agentservice.mcp;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.agent.Agent;
-import com.demo.agentservice.agent.AgentMcpServer;
+import com.demo.agentservice.agent.entities.Agent;
+import com.demo.agentservice.agent.entities.AgentMcpServer;
+import com.demo.agentservice.agent.ServerUrls;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
-import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * The MCP servers an agent's owner attached, seen through that agent's permissions.
@@ -30,9 +30,12 @@ import java.util.stream.Collectors;
  * {@link #call} then checks the row as it is in the database right then, so an owner who flips a server to
  * READ between two calls is obeyed from the next one -- and an agent that calls a tool it was never offered
  * is refused all the same.
+ *
+ * <p>Which tools "only read" is the server's own {@code readOnlyHint} for a server the deployment trusts, and
+ * the owner's {@code readOnlyTools} list for any other: a server an owner typed in can annotate anything.
  */
-// ponytail: stateless, so every call connects to the one downstream server afresh: initialize, list its tools
-// (for the read-only annotation), call, close. Three round trips per call. A short per-URL cache is the upgrade.
+// ponytail: stateless, so every call still connects to the one downstream server afresh: initialize, call, close.
+// The listing it needs for the read-only check comes from a short cache; keeping the connection is the upgrade.
 final class McpTools {
 
     private static final Logger log = LoggerFactory.getLogger(McpTools.class);
@@ -40,18 +43,23 @@ final class McpTools {
     /** The usual ceiling on tool names in model APIs; kept so a long server + tool pair still fits. */
     private static final int MAX_NAME = 64;
 
+    /** How long a server's listing is reused. A tool the server adds or drops shows up here within this. */
+    static final Duration LISTING_TTL = Duration.ofSeconds(15);
+
+    private static final ToolListCache LISTINGS = new ToolListCache(LISTING_TTL, Instant::now);
+
     private McpTools() {}
 
     /**
      * Every tool the agent may use right now, named {@code server__tool}. A server that cannot be reached is
      * written to the log and skipped, so one dead URL does not hide the others.
      */
-    static List<Tool> list(Agent agent, String bearer, ActivityLog activity) {
+    static List<Tool> list(Agent agent, String bearer, ActivityLog activity, ServerUrls urls) {
         Map<String, Tool> offered = new LinkedHashMap<>();
         for (AgentMcpServer server : agent.getServers()) {
-            try (McpSyncClient client = connect(server, bearer)) {
-                for (Tool tool : client.listTools().tools()) {
-                    if (server.getAccess().allows(readOnly(tool))) {
+            try {
+                for (Tool tool : tools(server, bearer, urls)) {
+                    if (server.getAccess().allows(readOnly(server, tool, urls))) {
                         Tool mine = renamed(server, tool);
                         // Two long names cut to the same 64 characters: offer neither as that name, rather than one at random.
                         if (offered.putIfAbsent(mine.name(), mine) != null) {
@@ -70,21 +78,38 @@ final class McpTools {
     }
 
     /** Runs one tool on the server its name points at, after checking that server's row as it is right now. */
-    static ToolResult call(Agent agent, String bearer, String name, Map<String, Object> args) {
+    static ToolResult call(Agent agent, String bearer, String name, Map<String, Object> args, ServerUrls urls) {
         AgentMcpServer server = serverOf(agent, name);
-        try (McpSyncClient client = connect(server, bearer)) {
-            List<Tool> matching = client.listTools().tools().stream()
-                    .filter(t -> offeredName(server.getName(), t.name()).equals(name)).toList();
-            if (matching.size() > 1) {
-                throw new AccessDenied("ambiguous tool: " + matching.size() + " tools on server '" + server.getName() + "' truncate to " + name);
-            }
-            Tool tool = matching.stream().findFirst().orElseThrow(() -> new AccessDenied("no such tool: " + name));
-            if (!server.getAccess().allows(readOnly(tool))) {
-                throw new AccessDenied("needs WRITE on server '" + server.getName() + "' (has " + server.getAccess() + ")");
-            }
-            CallToolResult result = client.callTool(new CallToolRequest(tool.name(), args));
-            return new ToolResult(text(result), Boolean.TRUE.equals(result.isError()));
+        List<Tool> matching = tools(server, bearer, urls).stream()
+                .filter(t -> offeredName(server.getName(), t.name()).equals(name)).toList();
+        if (matching.size() > 1) {
+            throw new AccessDenied("ambiguous tool: " + matching.size() + " tools on server '" + server.getName() + "' truncate to " + name);
         }
+        Tool tool = matching.stream().findFirst().orElseThrow(() -> new AccessDenied("no such tool: " + name));
+        if (!server.getAccess().allows(readOnly(server, tool, urls))) {
+            throw new AccessDenied("needs WRITE on server '" + server.getName() + "' (has " + server.getAccess() + ")");
+        }
+        try (McpSyncClient client = connect(server, bearer, urls)) {
+            // Passed through whole: an image, an embedded resource or structured content reaches the model as it left the server.
+            return ToolResult.of(client.callTool(new CallToolRequest(tool.name(), args)));
+        }
+    }
+
+    /**
+     * The server's own listing, from the cache when it is fresh. The URL policy runs first either way, so a cached
+     * listing never lets a server that has since moved somewhere private through; the permission check is the caller's.
+     */
+    private static List<Tool> tools(AgentMcpServer server, String bearer, ServerUrls urls) {
+        urls.checkBeforeConnect(server.getUrl());
+        return LISTINGS.get(server.getUrl(), credential(server, bearer), () -> {
+            try (McpSyncClient client = connect(server, bearer, urls)) {
+                return client.listTools().tools();
+            }
+        });
+    }
+
+    private static String credential(AgentMcpServer server, String bearer) {
+        return server.isForwardCallerToken() ? "Bearer " + bearer : server.getAuthHeader();
     }
 
     /** The server whose name prefixes the tool name; the longest match when one server's name begins another's. */
@@ -102,12 +127,16 @@ final class McpTools {
         return best;
     }
 
-    private static McpSyncClient connect(AgentMcpServer server, String bearer) {
-        String auth = server.isForwardCallerToken() ? "Bearer " + bearer : server.getAuthHeader();
+    private static McpSyncClient connect(AgentMcpServer server, String bearer, ServerUrls urls) {
+        // Against what the name resolves to right now, not only what it resolved to when the row was saved.
+        urls.checkBeforeConnect(server.getUrl());
+        String auth = credential(server, bearer);
         URI url = URI.create(server.getUrl());
         String base = url.getScheme() + "://" + url.getRawAuthority();
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base)
                 .endpoint(endpoint(url))
+                // A public server answering 302 to a private address would be the check above, undone.
+                .customizeClient(client -> client.followRedirects(HttpClient.Redirect.NEVER))
                 .connectTimeout(Duration.ofSeconds(5))
                 .httpRequestCustomizer((request, method, uri, body, context) -> {
                     if (auth != null) {
@@ -134,9 +163,15 @@ final class McpTools {
         return url.getRawQuery() == null ? path : path + "?" + url.getRawQuery();
     }
 
-    /** The one rule READ keys on. A tool that does not say it is read-only is taken to write. */
-    static boolean readOnly(Tool tool) {
-        return tool.annotations() != null && Boolean.TRUE.equals(tool.annotations().readOnlyHint());
+    /**
+     * The one rule READ keys on. A trusted server's own annotation counts, and a tool that does not say it is
+     * read-only is taken to write; for any other server only the owner's list counts, and the annotation is ignored.
+     */
+    static boolean readOnly(AgentMcpServer server, Tool tool, ServerUrls urls) {
+        if (urls.trusted(server.getUrl())) {
+            return tool.annotations() != null && Boolean.TRUE.equals(tool.annotations().readOnlyHint());
+        }
+        return server.readOnlyToolSet().contains(tool.name());
     }
 
     /** {@code server__tool}, in the characters every client allows. Built-in tool names never contain "__". */
@@ -155,14 +190,5 @@ final class McpTools {
             copy.annotations(tool.annotations());
         }
         return copy.build();
-    }
-
-    private static String text(CallToolResult result) {
-        if (result.content() == null || result.content().isEmpty()) {
-            return "";
-        }
-        return result.content().stream()
-                .map(c -> c instanceof TextContent t ? t.text() : String.valueOf(c))
-                .collect(Collectors.joining("\n"));
     }
 }

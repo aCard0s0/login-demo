@@ -16,12 +16,12 @@ account/  Account  AccountPermission  Access  Transfer  AccountRepository  Trans
           AccountService  AccountController  NewAccount  NewTransfer  Deposit  SetPermission
           AccountResponse  PermissionResponse  TransferResponse
 mcp/      AccountMcpServer
-token/    JwtVerifier  Revocations  Caller          (the same three files as agent-service)
 stats/    StatsController  PublicStats
 support/  AccountExceptionAdvice
 ```
 
-`account` depends on `token` for who the caller is; `mcp` depends on both and nothing points back.
+Plus `com.demo.auth.client` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`../../libs/auth-client`](../../libs/auth-client/README.md)
+module. `account` depends on it for who the caller is; `mcp` depends on both and nothing points back.
 
 ## Who is asking
 
@@ -100,7 +100,8 @@ Opening, depositing and granting are not offered at all. The annotation is what 
 permission keys on, so `transfer` must never carry it.
 
 To let one of your agents use it, add a server to the agent on `/agent?id=<id>`: url
-`http://account-service:9084/mcp`, **forward caller token** on, access READ or WRITE. Connect with the
+`http://account-service:9084/mcp` (a private name, so agent-service only accepts it because compose lists it
+in `AGENTS_TRUSTED_SERVER_URLS`), **forward caller token** on, access READ or WRITE. Connect with the
 agent's own token (**Create token** on that page): account-service sees the `agent` claim, and the agent
 reaches the accounts opened for it plus whatever it was granted -- and only those, whatever the
 agent-service access says.

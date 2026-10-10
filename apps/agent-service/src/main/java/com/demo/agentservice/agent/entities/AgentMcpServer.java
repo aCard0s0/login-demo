@@ -1,0 +1,84 @@
+package com.demo.agentservice.agent.entities;
+
+import com.demo.agentservice.agent.AuthHeaderCrypto;
+import com.demo.agentservice.agent.dto.Access;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * One MCP server an agent may use, and how far: READ or WRITE. The name is short and unique within the agent
+ * because it prefixes every tool name the model sees ({@code todos__list_todos}), which keeps two servers'
+ * tools apart.
+ *
+ * <p>Either a fixed {@code Authorization} header value -- encrypted at rest by {@link AuthHeaderCrypto}, plain
+ * text to the code -- or the token of the user who started the run, forwarded as-is ({@code forwardCallerToken}),
+ * the way the built-in todo server knows whose todos to show.
+ *
+ * <p>{@code readOnlyTools} is the owner's own word on which of this server's tools only read. It is what READ
+ * keys on for a server the deployment does not trust, since such a server can annotate anything it likes.
+ */
+@Entity
+@Table(name = "agent_mcp_servers", uniqueConstraints = @UniqueConstraint(columnNames = {"agent_id", "name"}))
+@Getter
+@Setter
+@NoArgsConstructor
+public class AgentMcpServer {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(optional = false)
+    private Agent agent;
+
+    @Column(nullable = false)
+    private String name;
+
+    @Column(nullable = false)
+    private String url;
+
+    @Convert(converter = AuthHeaderCrypto.class)
+    @Column(length = 2000)
+    private String authHeader;
+
+    @Column(nullable = false)
+    private boolean forwardCallerToken;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Access access;
+
+    /** Comma separated tool names, as the server names them. Null or empty: the owner marked none. */
+    @Column(length = 2000)
+    private String readOnlyTools;
+
+    public AgentMcpServer(Agent agent, String name, String url, String authHeader, boolean forwardCallerToken, Access access) {
+        this.agent = agent;
+        this.name = name;
+        this.url = url;
+        this.authHeader = authHeader;
+        this.forwardCallerToken = forwardCallerToken;
+        this.access = access;
+    }
+
+    public Set<String> readOnlyToolSet() {
+        return readOnlyTools == null || readOnlyTools.isBlank() ? Set.of()
+                : Arrays.stream(readOnlyTools.split(",")).map(String::strip).filter(s -> !s.isEmpty()).collect(Collectors.toSet());
+    }
+}

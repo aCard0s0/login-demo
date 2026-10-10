@@ -70,10 +70,11 @@ public class Tokens {
     /**
      * A long-lived token for one of the account's agents to connect to agent-service with: the account as
      * subject, the {@code AGENT} role, and the agent's id as a claim so agent-service can pin it to that one
-     * agent. It carries the account's current token version like any other, so "revoke access" kills it too.
+     * agent. It carries the account's current token version like any other, so "revoke access" kills it too,
+     * and the agent's own version as {@code agentVer}, so the owner can kill this one agent's tokens alone.
      */
-    public String issueForAgent(Long accountId, String email, String name, int version, Long agentId) {
-        return issue(accountId, email, name, "AGENT", version, Map.of("agent", agentId), agentTtl);
+    public String issueForAgent(Long accountId, String email, String name, int version, Long agentId, int agentVersion) {
+        return issue(accountId, email, name, "AGENT", version, Map.of("agent", agentId, "agentVer", agentVersion), agentTtl);
     }
 
     private String issue(Long accountId, String email, String name, String role, int version,
@@ -97,8 +98,8 @@ public class Tokens {
         return jwt.serialize();
     }
 
-    /** What a verified token says about its account: which one, and which generation of its tokens. */
-    public record Claims(Long accountId, int version) {}
+    /** What a verified token says about its account: which one, which generation of its tokens, and whether it was minted for an agent. */
+    public record Claims(Long accountId, int version, boolean agent) {}
 
     /** What a token names, or empty if the signature is wrong, the token is malformed, or it has expired. */
     public Optional<Claims> claimsFrom(String token) {
@@ -116,7 +117,7 @@ public class Tokens {
             }
             Long version = jwt.getJWTClaimsSet().getLongClaim("ver");
             return Optional.of(new Claims(Long.valueOf(jwt.getJWTClaimsSet().getSubject()),
-                    version == null ? 0 : version.intValue()));
+                    version == null ? 0 : version.intValue(), "AGENT".equals(jwt.getJWTClaimsSet().getStringClaim("role"))));
         } catch (Exception e) {
             return Optional.empty();
         }

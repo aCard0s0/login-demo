@@ -2,15 +2,25 @@ package com.demo.agentservice.agent;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.token.Caller;
+import com.demo.agentservice.agent.dto.*;
+import com.demo.agentservice.agent.entities.Agent;
+import com.demo.agentservice.agent.entities.AgentMcpServer;
+import com.demo.auth.client.Caller;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.InetAddress;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,11 +33,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 class AgentServiceTests {
 
+    /** The *.example servers below are public as far as the URL policy is concerned, without touching DNS. */
+    @TestConfiguration
+    static class FakeDns {
+        @Bean
+        @Primary
+        ServerUrls serverUrls(Environment env) {
+            return new ServerUrls(env, host -> new InetAddress[] {InetAddress.getByName(host.endsWith(".example") ? "93.184.216.34" : host)});
+        }
+    }
+
     @Autowired
     AgentService agents;
 
     @Autowired
     ActivityLog activity;
+
+    @Autowired
+    JdbcClient db;
+
+    @Autowired
+    AuthHeaderMigration migration;
 
     /** Owners are account ids, so every test uses ids of its own and the order they run in cannot matter. */
     private static Caller user(String id) {
@@ -98,6 +124,35 @@ class AgentServiceTests {
     }
 
     @Test
+    void anAuthHeaderIsEncryptedOnDiskAndPlainToTheCode() {
+        Agent a = agents.create(user("11"), new NewAgent("a", "", null));
+        AgentMcpServer s = agents.addServer(user("11"), a.getId(), new NewMcpServer("secret", "http://mcp.example/s", "Bearer s3cret", false, Access.READ), "");
+
+        String stored = db.sql("SELECT auth_header FROM agent_mcp_servers WHERE id = ?").param(s.getId()).query(String.class).single();
+        assertTrue(stored.startsWith("v1:"), stored);
+        assertFalse(stored.contains("s3cret"), "the secret must not be readable in the row");
+        assertEquals("Bearer s3cret", header(a, s), "and plain once loaded");
+
+        agents.updateServer(user("11"), a.getId(), s.getId(), new UpdateMcpServer(null, null, "Bearer other", null, null), "");
+        String again = db.sql("SELECT auth_header FROM agent_mcp_servers WHERE id = ?").param(s.getId()).query(String.class).single();
+        assertTrue(again.startsWith("v1:") && !again.equals(stored));
+        assertEquals("Bearer other", header(a, s));
+
+        // A row from before encryption existed is read as it is, and the startup migration rewrites it.
+        db.sql("UPDATE agent_mcp_servers SET auth_header = 'Bearer legacy' WHERE id = ?").param(s.getId()).update();
+        assertEquals("Bearer legacy", header(a, s));
+        assertEquals(1, migration.migrate());
+        assertTrue(db.sql("SELECT auth_header FROM agent_mcp_servers WHERE id = ?").param(s.getId()).query(String.class).single().startsWith("v1:"));
+        assertEquals("Bearer legacy", header(a, s));
+        assertEquals(0, migration.migrate(), "nothing left to migrate: it is idempotent");
+    }
+
+    /** The server's header as the code sees it, re-read from the database. */
+    private String header(Agent a, AgentMcpServer s) {
+        return agents.get(user("11"), a.getId()).getServers().stream().filter(x -> x.getId().equals(s.getId())).findFirst().orElseThrow().getAuthHeader();
+    }
+
+    @Test
     void serverNamesAreShortLowerCaseAndUniquePerAgent() {
         Agent a = agents.create(user("5"), new NewAgent("a", "", null));
         assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(), server("todos", Access.READ), ""),
@@ -106,6 +161,14 @@ class AgentServiceTests {
         assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(), server("", Access.READ), ""));
         assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(),
                 new NewMcpServer("ok", "ftp://nope", null, false, Access.READ), ""), "only http(s) servers");
+        // The URL policy is applied on the way in, on add and on edit: nothing private is ever saved.
+        assertEquals("url is refused: '10.0.0.1' resolves to 10.0.0.1, a loopback, private, link-local, carrier-grade NAT or multicast address",
+                assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(),
+                        new NewMcpServer("ok", "http://10.0.0.1/mcp", null, false, Access.READ), "")).getReason());
+        assertThrows(ResponseStatusException.class, () -> agents.updateServer(user("5"), a.getId(), a.getServers().get(0).getId(),
+                new UpdateMcpServer(null, "http://auth-service:9081/internal/agent-tokens", null, null, null), ""));
+        assertEquals(1, agents.get(user("5"), a.getId()).getServers().size());
+        assertEquals("http://localhost:9082/mcp", agents.get(user("5"), a.getId()).getServers().get(0).getUrl(), "the edit must not have stuck");
         assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(),
                 new NewMcpServer("ok", "http://mcp.example/", null, false, null), ""), "access is required");
 

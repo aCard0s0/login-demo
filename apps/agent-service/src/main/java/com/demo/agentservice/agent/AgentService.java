@@ -2,17 +2,21 @@ package com.demo.agentservice.agent;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.token.Caller;
+import com.demo.agentservice.agent.dto.*;
+import com.demo.agentservice.agent.entities.Agent;
+import com.demo.agentservice.agent.entities.AgentMcpServer;
+import com.demo.auth.client.Caller;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Everything an owner may do to its agents, and the only place that decides whose agents a caller sees. Every
@@ -30,11 +34,13 @@ public class AgentService {
 
     private final AgentRepository agents;
     private final ActivityLog activity;
+    private final ServerUrls urls;
     private final String todoMcpUrl;
 
-    public AgentService(AgentRepository agents, ActivityLog activity, @Value("${agents.todo-mcp-url:}") String todoMcpUrl) {
+    public AgentService(AgentRepository agents, ActivityLog activity, ServerUrls urls, @Value("${agents.todo-mcp-url:}") String todoMcpUrl) {
         this.agents = agents;
         this.activity = activity;
+        this.urls = urls;
         this.todoMcpUrl = todoMcpUrl == null ? "" : todoMcpUrl.strip();
     }
 
@@ -102,8 +108,9 @@ public class AgentService {
         if (in.access() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "access must be READ or WRITE");
         }
-        AgentMcpServer server = new AgentMcpServer(agent, name, cleanUrl(in.url()), blankToNull(in.authHeader()),
+        AgentMcpServer server = new AgentMcpServer(agent, name, urls.clean(in.url()), blankToNull(in.authHeader()),
                 Boolean.TRUE.equals(in.forwardCallerToken()), in.access());
+        server.setReadOnlyTools(cleanTools(in.readOnlyTools()));
         agent.getServers().add(server);
         // save() merges, so the row with an id is the one on the saved copy, not the one built above.
         return changed(agent, by, List.of("server '" + name + "' added (" + in.access() + ")")).getServers().stream()
@@ -121,7 +128,7 @@ public class AgentService {
             changes.add("server '" + was + "' renamed '" + server.getName() + "'");
         }
         if (in.url() != null && !in.url().strip().equals(server.getUrl())) {
-            server.setUrl(cleanUrl(in.url()));
+            server.setUrl(urls.clean(in.url()));
             changes.add("server '" + server.getName() + "' url changed");
         }
         if (in.authHeader() != null) {
@@ -136,6 +143,13 @@ public class AgentService {
         if (in.access() != null && in.access() != server.getAccess()) {
             changes.add("server '" + server.getName() + "' access " + server.getAccess() + " -> " + in.access());
             server.setAccess(in.access());
+        }
+        if (in.readOnlyTools() != null) {
+            String tools = cleanTools(in.readOnlyTools());
+            if (!Objects.equals(tools, server.getReadOnlyTools())) {
+                server.setReadOnlyTools(tools);
+                changes.add("server '" + server.getName() + "' read-only tools " + (tools == null ? "cleared" : "set: " + tools));
+            }
         }
         changed(agent, by, changes);
         return server;
@@ -184,19 +198,20 @@ public class AgentService {
         return clean;
     }
 
-    private static String cleanUrl(String url) {
-        try {
-            URI uri = URI.create(url == null ? "" : url.strip());
-            if (!("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) || uri.getHost() == null) {
-                throw new IllegalArgumentException();
-            }
-            return uri.toString();
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "url must be http(s)://host[:port]/path");
-        }
-    }
-
     private static String blankToNull(String s) {
         return s == null || s.isBlank() ? null : s.strip();
+    }
+
+    /** Tool names as the server names them, stripped, deduplicated and sorted; null when none are left. */
+    private static String cleanTools(List<String> tools) {
+        if (tools == null) {
+            return null;
+        }
+        String clean = tools.stream().filter(Objects::nonNull).map(String::strip).filter(s -> !s.isEmpty())
+                .distinct().sorted().collect(Collectors.joining(","));
+        if (clean.length() > 2000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "too many read-only tools");
+        }
+        return clean.isEmpty() ? null : clean;
     }
 }

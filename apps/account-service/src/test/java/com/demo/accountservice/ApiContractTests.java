@@ -3,8 +3,8 @@ package com.demo.accountservice;
 import com.demo.accountservice.account.dto.Access;
 import com.demo.accountservice.account.AccountService;
 import com.demo.accountservice.account.dto.NewAccount;
-import com.demo.accountservice.token.Caller;
-import com.demo.accountservice.token.JwtVerifier;
+import com.demo.auth.client.Caller;
+import com.demo.auth.client.JwtVerifier;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -156,7 +156,7 @@ class ApiContractTests {
         bank.setPermission(GRANTER, shared, HELPER.agentId(), Access.WRITE);
 
         call(get(BASE), "helper", null).andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("an agent token can only reach the accounts over MCP"));
+                .andExpect(jsonPath("$.error").value("an agent token can only connect to /mcp"));
         call(get(BASE + "/" + shared), "helper", null).andExpect(status().isForbidden());
         call(get(BASE + "/" + shared + "/transfers"), "helper", null).andExpect(status().isForbidden());
         call(post(BASE + "/" + shared + "/transfers"), "helper", "{\"to\":" + elsewhere + ",\"amount\":10}").andExpect(status().isForbidden());

@@ -34,7 +34,7 @@ cd "$ROOT"
 PROJECT="${LOGIN_DEMO_PROJECT:-login-demo}"; PORT="${LOGIN_DEMO_PORT:-3000}"
 COMPOSE_FILE="${LOGIN_DEMO_COMPOSE_FILE:-$ROOT/compose.yaml}"
 SERVICES="db auth-service todo-service agent-service account-service web"   # valid targets; feeds help and did-you-mean
-MODULES="auth-service todo-service agent-service account-service"          # the Maven modules, a subset of SERVICES
+MODULES="auth-client web-errors mcp-server auth-service todo-service agent-service account-service"    # the Maven modules `test` accepts
 DRY_RUN=""; ASSUME_YES=""; VERBOSE=""; TMP_DIR=""; CURRENT_CMD=""
 TARGETS=(); OPT_BUILD=""; OPT_NOCACHE=""
 # ── output: colour only on a TTY; values on stdout, prose on stderr ──
@@ -176,12 +176,12 @@ cmd_test() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -*) die "unknown option: $1 (try ./$PROG test --help)" 2 ;;
-      *)  valid_module "$1" || die "unknown module: $1. Valid modules: $MODULES" 2; module="apps/$1" ;;
+      *)  valid_module "$1" || die "unknown module: $1. Valid modules: $MODULES" 2; module=":$1" ;;   # by artifactId, so apps/ and libs/ both resolve
     esac
     shift
   done
   require_java
-  step "running tests${module:+ for ${module##*/}}"
+  step "running tests${module:+ for ${module#:}}"
   if [ -n "$module" ]; then run ./mvnw -pl "$module" test; else run ./mvnw test; fi
 }
 cmd_test_help() { say "  The suite runs against a throwaway SQLite file, so it needs no database and no"
@@ -291,7 +291,7 @@ cmd_db_reset_help() { say "  Drops the volume, so the init script runs again and
 cmd_verify() {
   no_args "$@"
   have curl || die "curl is not on PATH — verify talks to the stack over real HTTP" 3
-  local base="http://localhost:$PORT" email pass token todos id
+  local base="http://localhost:$PORT" email pass token todos id todo
   if [ -n "$DRY_RUN" ]; then note "+ would register an account and write a todo, a bank account and an agent against $base"; return 0; fi
 
   curl -fsS -o /dev/null "$base/api/public/stats" 2>/dev/null \
@@ -326,6 +326,7 @@ cmd_verify() {
     || die "the edit was refused" 1
   todos=$(curl -fsS "$base/api/todos" -H "Authorization: Bearer $token")
   case "$todos" in *'"verify edit"'*'"done":true'*) ;; *) die "the edit did not stick: $todos" 1 ;; esac
+  todo=$id
 
   # The point of the whole design: no token, no todos.
   if curl -fsS -o /dev/null "$base/api/todos" 2>/dev/null; then
@@ -359,28 +360,54 @@ cmd_verify() {
     die "agent-service served a list with no token at all" 1
   fi
 
+  # agent-service POSTs to the servers an owner attaches, from inside the compose network. Its own servers pass by
+  # name; anything pointing back into the network -- a compose name, the metadata address -- must be refused on save.
+  for probe in "http://auth-service:9081/internal/token-versions" "http://169.254.169.254/latest/meta-data" "http://127.0.0.1:9081/"; do
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base/api/agents/$id/servers" -H "Authorization: Bearer $token" \
+      -H 'content-type: application/json' -d "{\"name\":\"evil\",\"url\":\"$probe\",\"access\":\"READ\"}") || true
+    [ "$code" = 400 ] || die "a server at $probe was accepted ($code): agent-service would POST into its own network" 1
+  done
+  curl -fsS -o /dev/null -X POST "$base/api/agents/$id/servers" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
+    -d '{"name":"bank","url":"http://account-service:9084/mcp","access":"READ","forwardCallerToken":true}' \
+    || die "the built-in account server was refused: it must be on AGENTS_TRUSTED_SERVER_URLS" 1
+
   step "connecting to the agent over MCP"
   local atoken tools
   atoken=$(curl -fsS -X POST "$base/api/agents/$id/token" -H "Authorization: Bearer $token" \
     | sed -E 's/.*"token":"([^"]+)".*/\1/') || die "agent-service could not get a token from auth-service" 1
   case "$atoken" in *.*.*) ;; *) die "the agent token did not come back as a three-part JWT: $atoken" 1 ;; esac
-  # An agent's way into the bank is MCP through agent-service, where READ/WRITE and the activity log apply.
-  local code
-  code=$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/bank/accounts" -H "Authorization: Bearer $atoken") || true
-  [ "$code" = 403 ] || die "the bank's REST API answered the agent token with $code, not 403" 1
+  # An agent token opens /mcp and nothing else. Over REST it would skip agent-service's READ/WRITE check: a READ
+  # agent could DELETE a todo with its 30-day token, or edit its owner's account. Every service must say 403.
+  local code probe
+  for probe in "GET /api/todos" "DELETE /api/todos/$todo" "GET /api/accounts/me" "GET /api/bank/accounts" "GET /api/agents"; do
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -X "${probe%% *}" "$base${probe#* }" -H "Authorization: Bearer $atoken") || true
+    [ "$code" = 403 ] || die "$probe answered the agent token with $code, not 403 -- an agent bypassed the MCP gate" 1
+  done
   # The point of the whole design: an MCP client with the agent's token sees the one read-only todo tool and no other.
   tools=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" \
     -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}') || die "the MCP endpoint refused the agent token" 1
   case "$tools" in *'"name":"todos__list_todos"'*) ;; *) die "tools/list did not offer todos__list_todos: $tools" 1 ;; esac
   case "$tools" in *'todos__add_todo'*) die "a READ agent was offered a writing tool: $tools" 1 ;; esac
+  # Over MCP the same token lists the owner's todos, and a delete is refused by agent-service before it is forwarded.
+  local reply
+  reply=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"todos__list_todos","arguments":{}}}') || die "tools/call failed" 1
+  case "$reply" in *'verify edit'*) ;; *) die "a READ agent could not list the todos over MCP: $reply" 1 ;; esac
+  reply=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"todos__delete_todo\",\"arguments\":{\"id\":$todo}}}") || die "tools/call failed" 1
+  case "$reply" in *'needs WRITE'*'"isError":true'*) ;; *) die "a READ agent was not refused a delete over MCP: $reply" 1 ;; esac
+  todos=$(curl -fsS "$base/api/todos" -H "Authorization: Bearer $token")
+  case "$todos" in *'"verify edit"'*) ;; *) die "the todo is gone after a refused delete: $todos" 1 ;; esac
   if curl -fsS -o /dev/null -X POST "$base/mcp?agent=$id" -H 'content-type: application/json' \
     -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' 2>/dev/null \
     | grep -q '"tools"'; then
     die "the MCP endpoint listed tools with no token at all" 1
   fi
 
-  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows, the bank refused the agent token over REST"
+  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows, every REST API refused the agent token, agent-service refused to POST into its own network"
   note "this left an account, a todo, a bank account and an agent behind: $email"
   note "connect your own agent: open /agent?id=$id, Create token, paste the claude mcp add line"
 }

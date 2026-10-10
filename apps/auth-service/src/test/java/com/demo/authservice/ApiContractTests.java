@@ -283,12 +283,36 @@ class ApiContractTests {
         assertEquals(String.valueOf(adaId), claims.getSubject());
         assertEquals("AGENT", claims.getStringClaim("role"));
         assertEquals(42L, claims.getLongClaim("agent"));
+        assertEquals(0L, claims.getLongClaim("agentVer"), "an agent never revoked is at version zero");
         long days = java.time.Duration.between(java.time.Instant.now(), claims.getExpirationTime().toInstant()).toDays();
         assertEquals(29, days, "30 days, minus the seconds this test took");
 
-        // It is a token like any other: /api/accounts/me answers it, and a revoke kills it.
+        // Revoking one agent bumps its version alone: the feed says so under agent:<id>, the next token carries it,
+        // and the owner's own account is not in the feed at all.
+        mvc.perform(post("/internal/agent-tokens/42/revoke")).andExpect(status().isForbidden());
+        mvc.perform(post("/internal/agent-tokens/42/revoke").header("X-Internal-Secret", "test-internal-secret"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1));
+        mvc.perform(get("/internal/token-versions")).andExpect(status().isOk())
+                .andExpect(jsonPath("$['agent:42']").value(1))
+                .andExpect(jsonPath("$['" + adaId + "']").doesNotExist());
+        String fresh = mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertEquals(1L, com.nimbusds.jwt.SignedJWT.parse(fresh.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1"))
+                .getJWTClaimsSet().getLongClaim("agentVer"));
+
+        // Its only way in is /mcp: here it could edit its owner's account, so every /api endpoint answers it 403.
         mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(adaId));
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("an agent token can only connect to /mcp"));
+        mvc.perform(put("/api/accounts/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Taken","email":"taken@example.com","currentPassword":"lovelace-1815","newPassword":"taken-over-1"}"""))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/accounts").header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + ada))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.email").value("ada-agent@example.com"));
+        login("ada-agent@example.com", "lovelace-1815");
+        // And a revoke kills it like any other: dead first, so a revoked agent token is 401, not 403.
         String admin = login("admin@example.com", "admin-pass-01");
         mvc.perform(post("/api/accounts/" + adaId + "/revoke").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
         mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());

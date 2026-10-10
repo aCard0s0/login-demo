@@ -32,7 +32,7 @@
     <h2>MCP servers</h2>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th><th>URL</th><th>Access</th><th>Auth</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>URL</th><th>Access</th><th>Read-only tools</th><th>Auth</th><th></th></tr></thead>
         <tbody id="servers"></tbody>
       </table>
     </div>
@@ -40,6 +40,7 @@
       <input id="server-name" placeholder="name (a-z, 0-9, _ -)" pattern="[a-z0-9_-]{1,20}" required>
       <input id="server-url" placeholder="https://host/mcp" type="url" required>
       <select id="server-access"><option value="READ">READ</option><option value="WRITE">WRITE</option></select>
+      <input id="server-readonly" placeholder="read-only tools, comma separated">
       <button id="add-server">Add server</button>
       <label>
         <input id="server-forward" type="checkbox" style="width:auto"> Send my login token as its Authorization header
@@ -60,7 +61,9 @@
     </p>
     <form id="token-form">
       <button id="token">Create token</button>
-      <small>Revoking access on your account kills every token ever made here.</small>
+      <button type="button" id="revoke-tokens">Revoke tokens</button>
+      <small>Revoke tokens kills every token made here for this agent, within ten seconds; your login and your other
+      agents are untouched. Revoking access on your account kills them all.</small>
     </form>
     <div id="connect" hidden>
       <p class="ok">Token created. Copy it now -- it is not stored and will not be shown again.</p>
@@ -95,7 +98,9 @@
     <p class="note" id="no-activity" hidden>Nothing yet.</p>
 
     <p class="note">
-      <b>READ</b> offers the agent only the tools a server marks read-only; <b>WRITE</b> offers them all.
+      <b>READ</b> offers the agent only the tools that only read: for the servers this deployment trusts, the ones
+      the server itself marks read-only; for any server you add, the ones you list under <i>Read-only tools</i>.
+      <b>WRITE</b> offers them all.
       Permissions are checked by agent-service on every single tool call, against what is saved right now --
       change one while an agent is connected and its next call obeys it. A refused call shows here as
       <span class="badge tool_denied">tool_denied</span>.
@@ -151,6 +156,16 @@ const renderAgent = async () => {
     forward.onchange = () => patchServer(s.id, { forwardCallerToken: forward.checked }, `${s.name}: ${forward.checked ? 'sends' : 'no longer sends'} your token.`);
     const header = Object.assign(document.createElement('small'), { textContent: s.hasAuthHeader ? 'header set' : 'no header' });
     auth.append(forward, document.createTextNode(' token '), header);
+    // A server this deployment trusts says itself which tools only read. Any other can claim anything, so READ there
+    // offers exactly the tools the owner lists here, and nothing when the list is empty.
+    const readOnly = cell();
+    if (s.trusted) {
+      readOnly.append(Object.assign(document.createElement('small'), { textContent: 'its own annotations' }));
+    } else {
+      const list = Object.assign(document.createElement('input'), { value: s.readOnlyTools.join(', '), placeholder: 'none: READ offers nothing', title: 'tool names, comma separated' });
+      list.onchange = () => patchServer(s.id, { readOnlyTools: list.value.split(',') }, `${s.name}: read-only tools saved.`);
+      readOnly.append(list);
+    }
     const actions = cell(
       button(s.hasAuthHeader ? 'Clear header' : 'Set header', null, () => {
         const value = s.hasAuthHeader ? '' : prompt(`Authorization header value for ${s.name}:`);
@@ -164,7 +179,7 @@ const renderAgent = async () => {
       }),
     );
     actions.className = 'actions';
-    tr.append(cell(s.name), url, cell(accessSelect(s.access, (v) => patchServer(s.id, { access: v }, `${s.name} is now ${v}.`))), auth, actions);
+    tr.append(cell(s.name), url, cell(accessSelect(s.access, (v) => patchServer(s.id, { access: v }, `${s.name} is now ${v}.`))), readOnly, auth, actions);
     return tr;
   }));
 };
@@ -215,6 +230,7 @@ $('server-form').onsubmit = (e) => {
         name: $('server-name').value,
         url: $('server-url').value,
         access: $('server-access').value,
+        readOnlyTools: $('server-readonly').value.split(','),
         forwardCallerToken: $('server-forward').checked,
         authHeader: $('server-auth').value || null,
       }),
@@ -260,6 +276,12 @@ $('client').onchange = renderSnippet;
 $('copy-token').onclick = () => copy($('token-value').value, 'Token');
 $('copy-snippet').onclick = () => copy($('snippet').textContent, 'Snippet');
 $('token-value').onclick = (e) => e.target.select();
+
+$('revoke-tokens').onclick = () => {
+  if (!confirm('Kill every token made for this agent? Anything connected with one stops working within ten seconds.')) return;
+  $('connect').hidden = true;
+  act(() => api(`/api/agents/${id}/token/revoke`, { method: 'POST' }), 'Tokens revoked.');
+};
 
 $('token-form').onsubmit = (e) => {
   e.preventDefault();
