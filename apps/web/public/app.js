@@ -86,7 +86,7 @@ export const icon = (name) => {
   return span;
 };
 
-/** One header built in one place, so four pages cannot drift apart. */
+/** One header and sidebar built in one place, so the pages cannot drift apart. */
 export const renderNav = () => {
   const header = document.querySelector('header');
   if (!header) return;
@@ -108,16 +108,23 @@ export const renderNav = () => {
     const out = Object.assign(document.createElement('button'), { textContent: 'Log out', className: 'link' });
     out.prepend(icon('logout'));
     out.onclick = logout;
-    nav.append(who, link('/todos', 'Todos', 'todos'), link('/agents', 'Agents', 'agents'), link('/bank', 'Bank', 'bank'), link('/account', 'Account', 'account'));
-    if (claims().role === 'ADMIN') nav.append(link('/admin', 'Admin', 'admin'));
-    nav.append(out);
+    nav.append(who, link('/agents', 'Agents', 'agents'), link('/account', 'Account', 'account'), out);
+
+    // The role check only decides what to draw; the admin endpoints refuse anyone else server-side.
+    const side = document.createElement('nav');
+    side.className = 'side';
+    side.setAttribute('aria-label', 'Pages');
+    side.append(link('/todos', 'Todos', 'todos'), link('/bank', 'Bank', 'bank'));
+    if (claims().role === 'ADMIN') side.append(link('/admin', 'Admin', 'admin'));
+    header.after(side);
+    document.body.classList.add('with-side');
   } else {
     nav.append(link('/', 'Home', 'home'), link('/login', 'Log in', 'login'));
   }
-  for (const a of nav.querySelectorAll('a')) {
+  header.replaceChildren(brand, nav);
+  for (const a of document.querySelectorAll('nav a')) {
     if (a.pathname === location.pathname) a.setAttribute('aria-current', 'page');
   }
-  header.replaceChildren(brand, nav);
 };
 
 renderNav();

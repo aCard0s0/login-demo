@@ -21,7 +21,7 @@ minified, so what is in `public/` is what the browser gets.
 
 ```
 public/index.html  login.html  todos.html  account.html  agents.html  agent.html  bank.html  admin.html
-       app.js      token handling, the api() helper, the shared header
+       app.js      token handling, the api() helper, the shared header and sidebar
        style.css
 server.js          the fixed URL map and the /api proxy
 ```
