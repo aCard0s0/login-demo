@@ -1,4 +1,4 @@
-package com.demo.token;
+package com.demo.auth.client;
 
 /**
  * Who is asking, out of the token they sent: an account id, the role auth-service stamped on it, and -- for a

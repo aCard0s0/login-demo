@@ -22,13 +22,13 @@ agent/     Agent  AgentMcpServer  Access  OthersAccess  AgentRepository  AgentSe
            AuthHeaderCrypto  AuthHeaderMigration
 activity/  Activity  ActivityRepository  ActivityLog  ActivityResponse
 mcp/       AgentMcpServer (the /mcp endpoint and its handler)  McpTools  AgentTools  AccessDenied  ToolResult  ToolListCache
-token/     AgentTokens   (JwtVerifier, Revocations and Caller come from the shared libs/token module)
+token/     AgentTokens   (JwtVerifier, Revocations and Caller come from the shared libs/auth-client module)
 stats/     StatsController  PublicStats
 support/   AgentExceptionAdvice
 ```
 
 `mcp` depends on `agent` and `activity`; `agent` depends on `activity` and `token`; nothing points back.
-`com.demo.token` is the [`../../libs/token`](../../libs/token/README.md) module todo-service and account-service share.
+`com.demo.auth.client` is the [`../../libs/auth-client`](../../libs/auth-client/README.md) module todo-service and account-service share.
 `AgentService` is the one place that decides whose agents a caller sees, and both the REST API and the tools
 one agent uses on another go through it.
 
@@ -242,4 +242,4 @@ per URL and credential within the TTL, a failure never cached, and a key that ho
 token; `ServerUrlsTests` every refused address category,
 exact trust, and a name that moves to a private address between save and connect, all against a resolver
 table rather than DNS; `ApiContractTests` the 401, 404 and token shapes. The token check itself is tested
-once, in `../../libs/token`.
+once, in `../../libs/auth-client`.

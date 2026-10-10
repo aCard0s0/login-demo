@@ -9,7 +9,7 @@ import com.demo.agentservice.agent.dto.NewMcpServer;
 import com.demo.agentservice.agent.dto.OthersAccess;
 import com.demo.agentservice.agent.dto.UpdateAgent;
 import com.demo.agentservice.agent.dto.UpdateMcpServer;
-import com.demo.token.Caller;
+import com.demo.auth.client.Caller;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import io.modelcontextprotocol.spec.McpSchema.ToolAnnotations;
 import org.springframework.http.HttpStatus;

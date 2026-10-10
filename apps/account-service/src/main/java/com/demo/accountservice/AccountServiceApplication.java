@@ -3,7 +3,7 @@ package com.demo.accountservice;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-@SpringBootApplication(scanBasePackages = {"com.demo.accountservice", "com.demo.token"})
+@SpringBootApplication(scanBasePackages = {"com.demo.accountservice", "com.demo.auth.client"})
 public class AccountServiceApplication {
 
     public static void main(String[] args) {

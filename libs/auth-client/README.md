@@ -1,13 +1,13 @@
-# token
+# auth-client
 
-The one copy of how a service checks a caller's token without asking auth-service. A plain jar, not a
-service: no port, no database, no main class. todo-service, agent-service and account-service depend on it;
-auth-service does not, because it is the side that mints.
+auth-service's client half: the one copy of how a service checks a caller's token without asking
+auth-service. A plain jar, not a service: no port, no database, no main class. todo-service, agent-service
+and account-service depend on it; auth-service does not, because it is the side that mints.
 
 ```
-com.demo.token   JwtVerifier   the Authorization header -> a Caller, or 401
-                 Revocations   the /internal/token-versions feed, polled at most every 10s
-                 Caller        account id, role, and the agent an agent token is pinned to
+com.demo.auth.client   JwtVerifier   the Authorization header -> a Caller, or 401
+                       Revocations   the /internal/token-versions feed, polled at most every 10s
+                       Caller        account id, role, and the agent an agent token is pinned to
 ```
 
 `JwtVerifier` fetches auth-service's JWKS once, caches it, and verifies RS256 only -- a token asking for
@@ -26,7 +26,7 @@ here once it is back. Failing closed would take every service down with it.
 
 ## Using it
 
-Both beans are `@Component`s under `com.demo.token`, outside each service's own package, so the service's
+Both beans are `@Component`s under `com.demo.auth.client`, outside each service's own package, so the service's
 `@SpringBootApplication` lists both packages in `scanBasePackages`. Two properties:
 
 | Property | Environment | Default |
@@ -36,6 +36,6 @@ Both beans are `@Component`s under `com.demo.token`, outside each service's own 
 
 ## Tests
 
-`./mvnw -pl libs/token test`. `JwtVerifierTests` runs against a real throwaway JWKS server rather than a
+`./mvnw -pl libs/auth-client test`. `JwtVerifierTests` runs against a real throwaway JWKS server rather than a
 mock: the advertised key and nothing else, expiry, the revocation feed for accounts and for one agent alone,
 and the agent claims.

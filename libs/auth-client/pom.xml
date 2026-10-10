@@ -10,8 +10,8 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
-    <artifactId>token</artifactId>
-    <name>token</name>
+    <artifactId>auth-client</artifactId>
+    <name>auth-client</name>
     <description>Verifying auth-service's tokens in process: the one copy todo-, agent- and account-service share</description>
 
     <dependencies>

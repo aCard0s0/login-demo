@@ -1,8 +1,8 @@
 package com.demo.todoservice;
 
 import com.demo.todoservice.todo.TodoService;
-import com.demo.token.Caller;
-import com.demo.token.JwtVerifier;
+import com.demo.auth.client.Caller;
+import com.demo.auth.client.JwtVerifier;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,7 +39,7 @@ class ApiContractTests {
     @Autowired
     TodoService todos;
 
-    /** The verifier is tested against a real JWKS in libs/token; here it just maps two fixed tokens to two callers. */
+    /** The verifier is tested against a real JWKS in libs/auth-client; here it just maps two fixed tokens to two callers. */
     @MockitoBean
     JwtVerifier jwt;
 

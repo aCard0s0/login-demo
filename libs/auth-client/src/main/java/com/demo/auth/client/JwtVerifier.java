@@ -1,4 +1,4 @@
-package com.demo.token;
+package com.demo.auth.client;
 
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.jwk.source.JWKSource;

@@ -34,7 +34,7 @@ cd "$ROOT"
 PROJECT="${LOGIN_DEMO_PROJECT:-login-demo}"; PORT="${LOGIN_DEMO_PORT:-3000}"
 COMPOSE_FILE="${LOGIN_DEMO_COMPOSE_FILE:-$ROOT/compose.yaml}"
 SERVICES="db auth-service todo-service agent-service account-service web"   # valid targets; feeds help and did-you-mean
-MODULES="token auth-service todo-service agent-service account-service"    # the Maven modules `test` accepts
+MODULES="auth-client auth-service todo-service agent-service account-service"    # the Maven modules `test` accepts
 DRY_RUN=""; ASSUME_YES=""; VERBOSE=""; TMP_DIR=""; CURRENT_CMD=""
 TARGETS=(); OPT_BUILD=""; OPT_NOCACHE=""
 # ── output: colour only on a TTY; values on stdout, prose on stderr ──
@@ -176,12 +176,12 @@ cmd_test() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -*) die "unknown option: $1 (try ./$PROG test --help)" 2 ;;
-      *)  valid_module "$1" || die "unknown module: $1. Valid modules: $MODULES" 2; module="apps/$1" ;;
+      *)  valid_module "$1" || die "unknown module: $1. Valid modules: $MODULES" 2; module=":$1" ;;   # by artifactId, so apps/ and libs/ both resolve
     esac
     shift
   done
   require_java
-  step "running tests${module:+ for ${module##*/}}"
+  step "running tests${module:+ for ${module#:}}"
   if [ -n "$module" ]; then run ./mvnw -pl "$module" test; else run ./mvnw test; fi
 }
 cmd_test_help() { say "  The suite runs against a throwaway SQLite file, so it needs no database and no"

@@ -3,7 +3,7 @@ package com.demo.accountservice.mcp;
 import com.demo.accountservice.account.dto.Access;
 import com.demo.accountservice.account.AccountService;
 import com.demo.accountservice.account.dto.NewAccount;
-import com.demo.token.Caller;
+import com.demo.auth.client.Caller;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.RSASSASigner;

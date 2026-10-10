@@ -1,7 +1,7 @@
 package com.demo.todoservice.todo;
 
-import com.demo.token.Caller;
-import com.demo.token.JwtVerifier;
+import com.demo.auth.client.Caller;
+import com.demo.auth.client.JwtVerifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
