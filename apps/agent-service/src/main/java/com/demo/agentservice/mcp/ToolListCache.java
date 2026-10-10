@@ -2,16 +2,15 @@ package com.demo.agentservice.mcp;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Ticker;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -24,8 +23,9 @@ import java.util.function.Supplier;
  * agent row as it is right now, so the cache never extends a permission; and the URL policy runs before, so it
  * never skips the connect-time check either.
  *
- * <p>A Caffeine cache: entries expire by age, the least recently used go first past the size cap, and two
- * requests missing the same key at once make one connection, not two. A failed load caches nothing.
+ * <p>A Caffeine cache: entries expire by age and the least recently used go first past the size cap. The load runs
+ * outside it, so a slow server holds up nobody else's listing; two requests missing the same key at once may
+ * both connect. A failed load caches nothing.
  */
 final class ToolListCache {
 
@@ -33,19 +33,25 @@ final class ToolListCache {
 
     private final Cache<String, List<Tool>> entries;
 
-    /** {@code clock} is what the TTL is measured by: the tests move it, the service passes {@code Instant::now}. */
-    ToolListCache(Duration ttl, Supplier<Instant> clock) {
+    /** {@code ticker} is what the TTL is measured by: the tests move it, the service passes {@link Ticker#systemTicker()}. */
+    ToolListCache(Duration ttl, Ticker ticker) {
         this.entries = Caffeine.newBuilder()
                 .expireAfterWrite(ttl)
                 .maximumSize(MAX_ENTRIES)
-                .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.get().toEpochMilli()))
+                .ticker(ticker)
                 .build();
     }
 
     /** The cached list, or the one {@code load} produces, which is then kept for the TTL. */
     List<Tool> get(String url, String credential, Supplier<List<Tool>> load) {
         String key = url + " " + sha256(credential == null ? "" : credential);
-        return entries.get(key, k -> List.copyOf(load.get()));
+        List<Tool> tools = entries.getIfPresent(key);
+        if (tools == null) {
+            // Not entries.get(key, load): Caffeine runs that under a lock other keys can share, for the whole connection.
+            tools = List.copyOf(load.get());
+            entries.put(key, tools);
+        }
+        return tools;
     }
 
     static String sha256(String s) {

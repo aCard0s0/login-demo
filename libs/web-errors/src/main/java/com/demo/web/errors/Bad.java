@@ -3,7 +3,7 @@ package com.demo.web.errors;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-/** A 400 with a reason the page can show: {@code throw Bad.request("name is required")}. The one copy of what every service used to spell out itself. */
+/** A 400 with a reason the page can show: {@code throw Bad.request("name is required")}. */
 public final class Bad {
 
     private Bad() {}

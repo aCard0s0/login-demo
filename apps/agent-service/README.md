@@ -188,7 +188,6 @@ one fixed endpoint.
 | POST | `/api/agents/{id}/token/revoke` | kills every token made for this agent; the owner's login and other agents live on; 502 if auth-service is down |
 | POST | `/mcp?agent={id}` | MCP Streamable HTTP, see above |
 | GET | `/api/public/agents/stats` | `{agents}` -- no token |
-
 | GET | `/actuator/health` | `{"status":"UP"}` -- no token, no detail; the compose healthcheck. Outside `/api`, so the proxy never forwards it |
 
 A server's stored `authHeader` is never returned; responses carry `hasAuthHeader` instead, plus `trusted`
@@ -238,9 +237,9 @@ Hibernate build their throwaway schema.
   explicitly marked for it, and only when they are the deployment's own.
 - **Every `tools/call` still reconnects** to the one downstream server: initialize, call, close. The listing
   it needs comes from the 15-second cache, so two round trips rather than three; keeping the connection open is
-  the upgrade if latency ever matters. The cache is a Caffeine cache: entries expire after the 15 seconds, the
-  least recently used go first past a thousand entries, and two requests missing the same server at once make
-  one connection, not two.
+  the upgrade if latency ever matters. The cache is a Caffeine cache: entries expire after the 15 seconds and the
+  least recently used go first past a thousand entries. A listing loads outside it, so a slow server holds up no
+  other; two requests missing the same server at once may both connect.
 - **A per-agent revoke bites within ten seconds, not at once.** The other services poll the revocation feed
   rather than ask auth-service per request, so a revoked agent token keeps working for up to one poll window.
 - **One encryption key, no rotation.** The `v1:` prefix on each stored header is what a second key version

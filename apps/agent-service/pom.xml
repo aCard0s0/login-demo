@@ -37,7 +37,7 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
-        <!-- ToolListCache: a downstream server's listing, kept 15s, bounded, one connection per concurrent miss. -->
+        <!-- ToolListCache: a downstream server's listing, kept 15s, bounded, least recently used out first. -->
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>

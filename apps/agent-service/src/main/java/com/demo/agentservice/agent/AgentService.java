@@ -19,9 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -194,12 +194,13 @@ public class AgentService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "no such server"));
     }
 
-    /** The DTO's own annotations, as a 400 with the first one's sentence. */
+    /** The DTO's own annotations, as a 400 with one violation's sentence: the first by field name, so the same body always gets the same answer. */
     private <T> void valid(T in) {
-        Set<ConstraintViolation<T>> violations = validator.validate(in);
-        if (!violations.isEmpty()) {
-            throw Bad.request(violations.iterator().next().getMessage());
-        }
+        validator.validate(in).stream()
+                .min(Comparator.comparing((ConstraintViolation<T> v) -> v.getPropertyPath().toString()).thenComparing(ConstraintViolation::getMessage))
+                .ifPresent(v -> {
+                    throw Bad.request(v.getMessage());
+                });
     }
 
     /**
@@ -215,11 +216,10 @@ public class AgentService {
 
     /** Unique within the agent, because it becomes the prefix of every tool name the model sees. The alphabet is the DTO's rule. */
     private static String uniqueServerName(Agent agent, String name) {
-        String clean = name.strip();
-        if (agent.getServers().stream().anyMatch(s -> s.getName().equals(clean))) {
+        if (agent.getServers().stream().anyMatch(s -> s.getName().equals(name))) {
             throw Bad.request("server name already used by this agent");
         }
-        return clean;
+        return name;
     }
 
     private static String strip(String s) {

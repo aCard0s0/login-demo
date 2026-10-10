@@ -44,8 +44,13 @@ public class EncryptedText implements AttributeConverter<String, String> {
 
     /** Any string will do as the secret; its SHA-256 is the 32-byte AES key. Blank refuses to start rather than storing plain text. */
     public EncryptedText(String secret) {
+        this(secret, "the encryption key");
+    }
+
+    /** {@code property} names the setting in the error a blank secret starts with, so it says what to set. */
+    public EncryptedText(String secret, String property) {
         if (secret == null || secret.isBlank()) {
-            throw new IllegalStateException("no encryption key is set: the column would be stored as plain text");
+            throw new IllegalStateException(property + " is not set: the column would be stored as plain text");
         }
         try {
             this.key = new SecretKeySpec(MessageDigest.getInstance("SHA-256").digest(secret.strip().getBytes(StandardCharsets.UTF_8)), "AES");

@@ -25,9 +25,6 @@ rejections, so there is one advice per service and no question of which of two h
 public class TodoExceptionAdvice extends ErrorBodyAdvice {}
 ```
 
-A `@Valid` body that fails its constraints answers with the first violation's message, which is the sentence
-on the annotation, not Spring's "Invalid request content."
-
 ## Tests
 
 `ErrorBodyAdviceTests`, against a standalone MockMvc: a `Bad.request`, a body naming a value outside an

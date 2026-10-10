@@ -108,8 +108,15 @@ class ApiContractTests {
         mvc.perform(post("/api/agents/" + mine + "/servers").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"ok\",\"url\":\"http://mcp.example/\"}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("access must be READ or WRITE"));
+        mvc.perform(post("/api/agents/" + mine + "/servers").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"h\",\"url\":\"http://mcp.example/\",\"access\":\"READ\",\"authHeader\":\"Bearer é\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("authHeader must be printable ASCII"));
         mvc.perform(get("/api/agents/" + mine).header("Authorization", "Bearer four")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.servers.length()").value(1));   // none of the refused rows stuck
+        // Checked as stored, stripped: padding is not a violation.
+        mvc.perform(post("/api/agents/" + mine + "/servers").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\" padded \",\"url\":\" http://localhost:9084/mcp \",\"access\":\"READ\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("padded"));
     }
 
     /** The token an agent connects with opens /mcp and nothing else: here it could widen its own access or mint more tokens. */

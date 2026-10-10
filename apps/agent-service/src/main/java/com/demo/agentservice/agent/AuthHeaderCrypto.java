@@ -16,6 +16,6 @@ import org.springframework.stereotype.Component;
 public class AuthHeaderCrypto extends EncryptedText {
 
     public AuthHeaderCrypto(@Value("${agents.auth-header-key:}") String key) {
-        super(key);
+        super(key, "agents.auth-header-key");
     }
 }

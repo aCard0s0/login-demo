@@ -192,11 +192,11 @@ public class AgentMcpEndpoint {
                 result = ToolResult.error("error: the tool call failed; the agent's activity log has the detail");
             }
             // The tool has run by now. A log line that cannot be written must not turn a write that happened into a
-            // failure the model retries; it goes to the server log instead.
+            // failure the model retries; it goes to the server log instead -- without the arguments, which can carry secrets.
             try {
                 activity.record(s.agent().getId(), kind, line);
             } catch (RuntimeException e) {
-                log.warn("agent {}: could not record '{}'", s.agent().getId(), line, e);
+                log.warn("agent {}: could not record a {} line for tool '{}'", s.agent().getId(), kind, in.name(), e);
             }
             CallToolResult.Builder out = CallToolResult.builder()
                     .content(result.content().isEmpty() ? List.of(new TextContent("(empty)")) : result.content())
