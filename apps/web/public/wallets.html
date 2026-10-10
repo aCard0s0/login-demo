@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wallets &middot; login-demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header></header>
+
+  <main>
+    <h1>Your wallets</h1>
+    <form id="open-form">
+      <input id="open-name" placeholder="Name, e.g. savings" required maxlength="100">
+      <select id="open-for"><option value="">For me</option></select>
+      <button>Open</button>
+    </form>
+    <p class="error" id="error"></p>
+    <p class="ok" id="done"></p>
+    <div class="table-wrap" id="list" hidden>
+      <table>
+        <thead><tr><th>Wallet</th><th>For</th><th>Balance</th><th>Agents allowed</th><th></th></tr></thead>
+        <tbody id="wallets"></tbody>
+      </table>
+    </div>
+    <p class="note" id="empty" hidden>No wallets yet.</p>
+
+    <h2>Move money</h2>
+    <form id="transfer-form">
+      <select id="transfer-from" required></select>
+      <input id="transfer-to" type="number" min="1" step="1" placeholder="to wallet #" required>
+      <input id="transfer-amount" type="number" min="0.01" step="0.01" placeholder="amount" required>
+      <button>Transfer</button>
+    </form>
+
+    <h2>Let an agent use a wallet</h2>
+    <form id="grant-form">
+      <select id="grant-wallet" required></select>
+      <select id="grant-agent" required></select>
+      <select id="grant-access"><option value="READ">READ</option><option value="WRITE">WRITE</option></select>
+      <button>Grant</button>
+    </form>
+
+    <h2 id="history-title" hidden>History</h2>
+    <div class="table-wrap" id="history" hidden>
+      <table>
+        <thead><tr><th>When</th><th>From</th><th>To</th><th>Amount</th><th>By</th></tr></thead>
+        <tbody id="transfers"></tbody>
+      </table>
+    </div>
+
+    <p class="note">
+      A wallet opened <b>for an agent</b> is the agent's own: connected with its token it can spend from it.
+      A <b>READ</b> grant lets an agent see another of your wallets and its history, <b>WRITE</b> lets it
+      also transfer out of it. Agents can never open wallets, deposit, or change grants. To let an agent
+      reach your wallets at all, add <code>http://wallet-service:9084/mcp</code> to it on its page with
+      <i>send my login token</i> on, and connect with the agent's own token: wallet-service refuses a login token
+      coming through an agent, since that would hand the agent everything you have.
+    </p>
+  </main>
+
+<script type="module">
+import { $, api, icon, requireLogin } from '/app.js';
+
+const button = (text, name, onclick) => {
+  const b = Object.assign(document.createElement('button'), { textContent: text, onclick });
+  if (name) b.prepend(icon(name));
+  return b;
+};
+const cell = (...children) => {
+  const td = document.createElement('td');
+  td.append(...children);
+  return td;
+};
+const badge = (text) => Object.assign(document.createElement('span'), { className: `badge ${text.toLowerCase()}`, textContent: text });
+const money = (cents) => (cents / 100).toFixed(2);
+// Units with at most two decimals, or nothing: "2.345" must not quietly become 234 cents and junk must not become null.
+const cents = (value) => {
+  if (!/^\d+(\.\d{1,2})?$/.test(String(value).trim())) throw new Error('amount must be like 12 or 12.50');
+  return Math.round(Number(value) * 100);
+};
+
+let agents = [];
+const agentName = (id) => agents.find((a) => a.id === id)?.name ?? `agent #${id}`;
+const fill = (select, options, keep) => {
+  const was = select.value;
+  select.replaceChildren(...options.map(([value, text]) => new Option(text, value)));
+  if (keep && [...select.options].some((o) => o.value === was)) select.value = was;
+};
+
+let shown = null; // the wallet whose history is open
+const render = async () => {
+  const wallets = await api('/api/wallets');
+  $('empty').hidden = wallets.length > 0;
+  $('list').hidden = wallets.length === 0;
+  $('wallets').replaceChildren(...wallets.map((a) => {
+    const tr = document.createElement('tr');
+    // textContent throughout: names are whatever the owner typed.
+    const name = cell(`#${a.id} ${a.name}`);
+    const who = cell(a.agentId == null ? 'me' : agentName(a.agentId));
+    const granted = cell();
+    granted.append(...a.grants.flatMap((p) => {
+      const span = Object.assign(document.createElement('span'), { className: 'inline' });
+      const revoke = button('×', null, () => act(null, () => api(`/api/wallets/${a.id}/grants/${p.agentId}`, { method: 'DELETE' }),
+        `${agentName(p.agentId)} no longer reaches ${a.name}.`));
+      revoke.setAttribute('aria-label', `Remove ${agentName(p.agentId)} from ${a.name}`);
+      span.append(document.createTextNode(agentName(p.agentId) + ' '), badge(p.access), revoke);
+      return [span, document.createTextNode(' ')];
+    }));
+    if (!a.grants.length) granted.append(Object.assign(document.createElement('small'), { textContent: 'none' }));
+    const actions = cell(
+      button('Deposit', 'add', () => {
+        const value = prompt(`Deposit into ${a.name}: amount`);
+        if (value === null) return;
+        act(null, () => api(`/api/wallets/${a.id}/deposit`, { method: 'POST', body: JSON.stringify({ amount: cents(value) }) }),
+          `Deposited ${value} into ${a.name}.`);
+      }),
+      button('History', null, () => { shown = shown === a.id ? null : a.id; renderHistory().catch(fail); }),
+    );
+    actions.className = 'actions';
+    tr.append(name, who, cell(money(a.balance)), granted, actions);
+    return tr;
+  }));
+  const own = wallets.map((a) => [a.id, `#${a.id} ${a.name} (${money(a.balance)})`]);
+  fill($('transfer-from'), own, true);
+  fill($('grant-wallet'), own, true);
+};
+
+const renderHistory = async () => {
+  $('history-title').hidden = $('history').hidden = shown === null;
+  if (shown === null) return;
+  const rows = await api(`/api/wallets/${shown}/transfers`);
+  $('history-title').textContent = `History of #${shown}`;
+  $('transfers').replaceChildren(...rows.map((t) => {
+    const tr = document.createElement('tr');
+    const when = cell(new Date(t.at).toLocaleTimeString());
+    when.className = 'when';
+    when.title = new Date(t.at).toLocaleString();
+    tr.append(when, cell(t.from == null ? 'deposit' : `#${t.from}`), cell(`#${t.to}`), cell(money(t.amount)), cell(t.by));
+    return tr;
+  }));
+};
+
+const fail = (err) => { $('error').textContent = err.message; };
+// Every button -- forms and table rows alike -- is disabled while a request is in flight, so a double click cannot send anything twice.
+const buttons = () => document.querySelectorAll('main button');
+const act = async (question, action, success) => {
+  if (question && !confirm(question)) return;
+  $('error').textContent = '';
+  $('done').textContent = '';
+  buttons().forEach((b) => { b.disabled = true; });
+  try {
+    await action();
+    $('done').textContent = success;
+  } catch (err) {
+    fail(err);
+  }
+  await Promise.all([render(), renderHistory()]).catch(fail);
+  buttons().forEach((b) => { b.disabled = false; });
+};
+
+$('open-form').onsubmit = (e) => {
+  e.preventDefault();
+  act(null, async () => {
+    await api('/api/wallets', {
+      method: 'POST',
+      body: JSON.stringify({ name: $('open-name').value, agentId: $('open-for').value ? Number($('open-for').value) : null }),
+    });
+    $('open-form').reset();
+  }, 'Opened.');
+};
+
+$('transfer-form').onsubmit = (e) => {
+  e.preventDefault();
+  const from = $('transfer-from').value, to = $('transfer-to').value, amount = $('transfer-amount').value;
+  act(null, async () => {
+    await api(`/api/wallets/${from}/transfers`, { method: 'POST', body: JSON.stringify({ to: Number(to), amount: cents(amount) }) });
+    $('transfer-to').value = '';
+    $('transfer-amount').value = '';
+  }, `Moved ${amount} from #${from} to #${to}.`);
+};
+
+$('grant-form').onsubmit = (e) => {
+  e.preventDefault();
+  const wallet = $('grant-wallet').value, agent = $('grant-agent').value, access = $('grant-access').value;
+  act(null, () => api(`/api/wallets/${wallet}/grants/${agent}`, { method: 'PUT', body: JSON.stringify({ access }) }),
+    `${agentName(Number(agent))} may now ${access} #${wallet}.`);
+};
+
+if (requireLogin()) {
+  // Agents come from agent-service, so wallet-service never has to know them: the page joins the two by id.
+  api('/api/agents')
+    .then((list) => {
+      agents = list;
+      fill($('open-for'), [['', 'For me'], ...agents.map((a) => [a.id, `For agent: ${a.name}`])]);
+      fill($('grant-agent'), agents.length ? agents.map((a) => [a.id, a.name]) : [['', 'no agents yet']]);
+    })
+    .catch(fail)
+    .then(render)
+    .catch(fail);
+}
+</script>
+</body>
+</html>

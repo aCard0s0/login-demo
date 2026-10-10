@@ -24,7 +24,7 @@ class TodoServiceTests {
     @Autowired
     TodoService todos;
 
-    /** Owners are account ids, so every test uses ids of its own and the order they run in cannot matter. */
+    /** Owners are user ids, so every test uses ids of its own and the order they run in cannot matter. */
     private static Caller user(String id) {
         return new Caller(id, "USER");
     }
@@ -49,7 +49,7 @@ class TodoServiceTests {
         assertEquals("buy milk", mine.getTitle(), "a title is stripped on the way in");
 
         assertThrows(ResponseStatusException.class, () -> todos.update(user("4"), mine.getId(), "buy beer", null),
-                "another account's todo must not be editable");
+                "another user's todo must not be editable");
         assertThrows(ResponseStatusException.class, () -> todos.update(user("3"), 999_999L, "ghost", null));
         assertThrows(ResponseStatusException.class, () -> todos.update(user("3"), mine.getId(), "   ", null),
                 "a blank title is rejected rather than saved");

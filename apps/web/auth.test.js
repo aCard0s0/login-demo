@@ -25,10 +25,10 @@ const agent = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'application/json' }).end('[]');
 });
 
-// And a stand-in account-service.
-const seenByBank = [];
-const bank = createServer((req, res) => {
-  seenByBank.push({ method: req.method, url: req.url });
+// And a stand-in wallet-service.
+const seenByWallet = [];
+const wallet = createServer((req, res) => {
+  seenByWallet.push({ method: req.method, url: req.url });
   res.writeHead(200, { 'content-type': 'application/json' }).end('[]');
 });
 
@@ -38,21 +38,21 @@ before(async () => {
   await once(auth, 'listening');
   agent.listen(0);
   await once(agent, 'listening');
-  bank.listen(0);
-  await once(bank, 'listening');
+  wallet.listen(0);
+  await once(wallet, 'listening');
   const free = createServer().listen(0);
   await once(free, 'listening');
   const port = free.address().port;
   free.close();
   web = spawn(process.execPath, ['server.js'], {
     cwd: import.meta.dirname,
-    env: { ...process.env, PORT: port, AUTH_URL: `http://localhost:${auth.address().port}`, AGENT_URL: `http://localhost:${agent.address().port}`, ACCOUNT_URL: `http://localhost:${bank.address().port}` },
+    env: { ...process.env, PORT: port, AUTH_URL: `http://localhost:${auth.address().port}`, AGENT_URL: `http://localhost:${agent.address().port}`, WALLET_URL: `http://localhost:${wallet.address().port}` },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   await once(web.stdout, 'data');
   base = `http://localhost:${port}`;
 });
-after(() => { web.kill(); auth.close(); agent.close(); bank.close(); });
+after(() => { web.kill(); auth.close(); agent.close(); wallet.close(); });
 
 test('POST /api/login reaches auth-service with method, body and status intact', async () => {
   const res = await fetch(`${base}/api/login`, { method: 'POST', body: '{"email":"a@b.c","password":"x"}' });
@@ -63,8 +63,8 @@ test('POST /api/login reaches auth-service with method, body and status intact',
 });
 
 test('Authorization header passes through untouched', async () => {
-  await fetch(`${base}/api/accounts/me`, { headers: { authorization: 'Bearer t0k' } });
-  assert.equal(seen.at(-1).url, '/api/accounts/me');
+  await fetch(`${base}/api/users/me`, { headers: { authorization: 'Bearer t0k' } });
+  assert.equal(seen.at(-1).url, '/api/users/me');
   assert.equal(seen.at(-1).headers.authorization, 'Bearer t0k');
 });
 
@@ -83,19 +83,18 @@ test('/api/agents and /api/public/agents reach agent-service, not auth-service',
   assert.equal(seen.length, before, 'auth-service saw none of it');
 });
 
-test('/api/bank and /api/public/bank reach account-service; /api/accounts still reaches auth-service', async () => {
+test('/api/wallets and /api/public/wallets reach wallet-service; /api/users still reaches auth-service', async () => {
   const before = seen.length;
-  await fetch(`${base}/api/bank/accounts/3/transfers`, { headers: { authorization: 'Bearer t0k' } });
-  assert.equal(seenByBank.at(-1).url, '/api/bank/accounts/3/transfers');
-  await fetch(`${base}/api/public/bank/stats`);
-  assert.equal(seenByBank.at(-1).url, '/api/public/bank/stats');
+  await fetch(`${base}/api/wallets/3/transfers`, { headers: { authorization: 'Bearer t0k' } });
+  assert.equal(seenByWallet.at(-1).url, '/api/wallets/3/transfers');
+  await fetch(`${base}/api/public/wallets/stats`);
+  assert.equal(seenByWallet.at(-1).url, '/api/public/wallets/stats');
   assert.equal(seen.length, before, 'auth-service saw none of it');
-  // The login accounts and the money accounts share a word, not a service.
-  await fetch(`${base}/api/accounts/me`);
-  assert.equal(seen.at(-1).url, '/api/accounts/me');
-  // A whole segment, not a prefix: /api/banking is not the bank's.
-  await fetch(`${base}/api/banking`);
-  assert.equal(seen.at(-1).url, '/api/banking');
+  await fetch(`${base}/api/users/me`);
+  assert.equal(seen.at(-1).url, '/api/users/me');
+  // A whole segment, not a prefix: /api/wallets-archive is not wallet-service's.
+  await fetch(`${base}/api/wallets-archive`);
+  assert.equal(seen.at(-1).url, '/api/wallets-archive');
 });
 
 test('provider start returns the 302 for the browser to follow, not the proxy', async () => {
@@ -142,7 +141,7 @@ test('api(): token rides as Bearer; 401 with a token clears the session and boun
   assert.equal(location.href, '/todos', 'no token held, so no bounce');
 
   setSession('t0k', 'Ana');
-  await assert.rejects(api('/api/accounts/me'), { message: 'session expired' });
+  await assert.rejects(api('/api/users/me'), { message: 'session expired' });
   assert.equal(sent.init.headers.authorization, 'Bearer t0k');
   assert.equal(store.size, 0, 'session forgotten');
   assert.equal(location.href, '/login?expired');

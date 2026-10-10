@@ -115,7 +115,7 @@ curl -s -X POST "http://localhost:3000/mcp?agent=<id>" \
   READ/WRITE check lives in agent-service, and the token is never allowed to go around it.
 - **Revoke tokens** on the agent's page kills every token made for that one agent, within ten seconds; your
   login and your other agents keep working. Make a new token afterwards.
-- **Revoke access** on the account (`/admin`, or an admin on your behalf) kills every agent token at once,
+- **Revoke access** on the user (`/admin`, or an admin on your behalf) kills every agent token at once,
   along with your login tokens.
 - Stored where your client keeps its config, in plain text. Treat it like a password: it acts as you, within
   what the agent is allowed.

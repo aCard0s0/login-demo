@@ -4,7 +4,7 @@ import com.demo.todoservice.todo.TodoService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Deliberately unauthenticated, for the landing page. Nothing here is scoped to an account. */
+/** Deliberately unauthenticated, for the landing page. Nothing here is scoped to a user. */
 @RestController
 public class StatsController {
 

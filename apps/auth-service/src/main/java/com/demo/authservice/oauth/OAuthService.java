@@ -1,7 +1,7 @@
 package com.demo.authservice.oauth;
 
-import com.demo.authservice.account.Account;
-import com.demo.authservice.account.AccountService;
+import com.demo.authservice.user.entities.User;
+import com.demo.authservice.user.UserService;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -29,9 +29,9 @@ import java.util.Map;
  * switching it back off than the flow itself takes. Nothing here needs a filter: the browser arrives at two
  * ordinary endpoints.
  *
- * <p>An account is matched to a provider identity by <b>verified</b> email and nothing else. That is what
- * makes "log in with Google" and "log in with a password" the same account, and why an unverified address
- * is refused: accepting one would let anyone who can claim an address at a provider walk into the account
+ * <p>A user is matched to a provider identity by <b>verified</b> email and nothing else. That is what
+ * makes "log in with Google" and "log in with a password" the same user, and why an unverified address
+ * is refused: accepting one would let anyone who can claim an address at a provider walk into the user
  * that already owns it here.
  */
 @Service
@@ -44,11 +44,11 @@ public class OAuthService {
 
     private final OAuthProperties config;
 
-    private final AccountService accounts;
+    private final UserService users;
 
-    public OAuthService(OAuthProperties config, AccountService accounts) {
+    public OAuthService(OAuthProperties config, UserService users) {
         this.config = config;
-        this.accounts = accounts;
+        this.users = users;
     }
 
     /** A verified email and a display name, which is all we take from a provider. */
@@ -79,17 +79,17 @@ public class OAuthService {
     }
 
     /**
-     * Everything behind the code: the provider's token, the identity it names, the account that identity
-     * belongs to, and one of our JWTs for it. Returns the token and the account's name, which is all the
+     * Everything behind the code: the provider's token, the identity it names, the user that identity
+     * belongs to, and one of our JWTs for it. Returns the token and the user's name, which is all the
      * callback redirect carries.
      */
-    public Account login(OAuthProvider provider, String code, String verifier) {
+    public User login(OAuthProvider provider, String code, String verifier) {
         Identity identity = identityOf(provider, accessToken(provider, code, verifier));
-        return accounts.findOrCreateFromOAuth(identity.email(), identity.name());
+        return users.findOrCreateFromOAuth(identity.email(), identity.name());
     }
 
-    public String issue(Account account) {
-        return accounts.issue(account);
+    public String issue(User user) {
+        return users.issue(user);
     }
 
     /**

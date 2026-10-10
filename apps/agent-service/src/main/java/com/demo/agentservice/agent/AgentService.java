@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 
 /**
  * Everything an owner may do to its agents, and the only place that decides whose agents a caller sees. Every
- * lookup goes through {@link #get}, so another account's agent is "not found" everywhere -- in the REST API
+ * lookup goes through {@link #get}, so another user's agent is "not found" everywhere -- in the REST API
  * and in the tools one agent uses on another alike.
  *
  * <p>Every change is written to the agent's activity log, prefixed with who made it when it was not the owner
@@ -45,25 +45,25 @@ public class AgentService {
         this.todoMcpUrl = todoMcpUrl == null ? "" : todoMcpUrl.strip();
     }
 
-    /** How many agents exist across every account. Public: a total gives away nobody's setup. */
+    /** How many agents exist across every user. Public: a total gives away nobody's setup. */
     public long count() {
         return agents.count();
     }
 
     public List<Agent> list(Caller caller) {
-        return agents.findByOwnerOrderByIdAsc(caller.accountId());
+        return agents.findByOwnerOrderByIdAsc(caller.userId());
     }
 
     /** The caller's agent, or 404. Someone else's id comes back "not found" rather than "forbidden". */
     public Agent get(Caller caller, Long id) {
-        return agents.findByIdAndOwner(id, caller.accountId())
+        return agents.findByIdAndOwner(id, caller.userId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "no such agent"));
     }
 
     /** A new agent, starting with the built-in todo server as READ when the deployment has one. */
     @Transactional
     public Agent create(Caller caller, NewAgent in) {
-        Agent agent = new Agent(caller.accountId(), cleanName(in.name()),
+        Agent agent = new Agent(caller.userId(), cleanName(in.name()),
                 in.instructions() == null ? "" : in.instructions().strip(),
                 in.othersAccess() == null ? OthersAccess.NONE : in.othersAccess());
         if (!todoMcpUrl.isEmpty()) {

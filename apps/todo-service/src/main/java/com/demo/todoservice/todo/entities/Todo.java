@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * One todo, owned by the id of the account that created it. The id rather than the email, because an account
+ * One todo, owned by the id of the user that created it. The id rather than the email, because a user
  * can change its email and its todos must not be orphaned when it does.
  */
 @Entity

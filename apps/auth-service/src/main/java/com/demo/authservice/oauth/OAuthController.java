@@ -1,6 +1,6 @@
 package com.demo.authservice.oauth;
 
-import com.demo.authservice.account.Account;
+import com.demo.authservice.user.entities.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -122,12 +122,12 @@ public class OAuthController {
             return done.header(HttpHeaders.LOCATION, landing("error", label(target) + " sent no authorization code")).build();
         }
         try {
-            Account account = oauth.login(target, code, verifier);
-            if (account.isSuspended()) {
-                return done.header(HttpHeaders.LOCATION, landing("error", "this account is suspended")).build();
+            User user = oauth.login(target, code, verifier);
+            if (user.isSuspended()) {
+                return done.header(HttpHeaders.LOCATION, landing("error", "this user is suspended")).build();
             }
-            return done.header(HttpHeaders.LOCATION, landing("token", oauth.issue(account))
-                    + "&name=" + encode(account.getName()) + "&role=" + account.getRole().name()).build();
+            return done.header(HttpHeaders.LOCATION, landing("token", oauth.issue(user))
+                    + "&name=" + encode(user.getName()) + "&role=" + user.getRole().name()).build();
         } catch (Exception e) {
             // The provider's own wording can name internals, so the browser gets a flat message and the
             // detail goes to the container log.

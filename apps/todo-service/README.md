@@ -1,6 +1,6 @@
 # todo-service
 
-Per-account todos. Port **9082**.
+Per-user todos. Port **9082**.
 
 It never calls auth-service to find out who is asking. It fetches the public half of auth-service's signing
 key once, caches it, and verifies every token in process -- so there is no per-request hop, and holding only
@@ -21,7 +21,7 @@ support/  TodoExceptionAdvice
 ```
 
 Plus `com.demo.auth.client` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`../../libs/auth-client`](../../libs/auth-client/README.md)
-module, which agent-service and account-service use too. `todo` depends on it for who the caller is; `mcp`
+module, which agent-service and wallet-service use too. `todo` depends on it for who the caller is; `mcp`
 depends on both and nothing points back. `stats` is the unauthenticated corner,
 kept apart so the trust boundary shows up in the tree.
 
@@ -32,7 +32,7 @@ so a token asking for `none` or a symmetric algorithm is rejected before its sig
 claims verifier requires `sub` and `exp` -- a token with no expiry is refused outright rather than treated
 as one that never expires.
 
-What comes back is a `Caller`: an account id, a role and, for an agent token, the agent it is pinned to. The
+What comes back is a `Caller`: a user id, a role and, for an agent token, the agent it is pinned to. The
 role is a plain string, not an enum copied over from auth-service -- the verifying side shares no code with
 the minting side on purpose -- and this service only ever asks two questions of it, both of which answer
 "no" for anything unrecognised, so an unknown role, or a token with no `role` claim at all, lands on least
@@ -66,14 +66,14 @@ READ/WRITE setting is applied and every call is logged. Over REST a READ agent c
 `TodoRepository` has an owner-scoped query for each operation (`findByOwnerOrderByIdAsc`,
 `findByIdAndOwner`) plus the two unscoped reads the read-everyone roles need. `TodoService` is the only
 thing that picks between them, through one private `writable(caller, id)` that every write goes through: a
-caller that does not write everyone can reach no other account's row, and a moderator -- which reads
+caller that does not write everyone can reach no other user's row, and a moderator -- which reads
 everyone but writes only its own -- lands on the owner-scoped lookup for every write exactly as a user does.
 
 Someone else's todo id comes back **404, not 403**, so neither answer says whether that todo exists.
 
 ## Owners
 
-The owner is the account **id** from the token's `sub`, not the email, so changing an email cannot orphan a
+The owner is the user **id** from the token's `sub`, not the email, so changing an email cannot orphan a
 list.
 
 It is in the todo response because a role that reads everyone would otherwise get a list it could not make

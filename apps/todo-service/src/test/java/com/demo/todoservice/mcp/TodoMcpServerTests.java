@@ -105,10 +105,10 @@ class TodoMcpServerTests {
 
             assertTrue(text(one.callTool(new CallToolRequest("list_todos", Map.of()))).contains("buy milk"));
             assertEquals("no todos", text(two.callTool(new CallToolRequest("list_todos", Map.of()))),
-                    "another account's todos must not show up");
+                    "another user's todos must not show up");
 
             CallToolResult theirs = two.callTool(new CallToolRequest("update_todo", Map.of("id", id, "done", true)));
-            assertTrue(Boolean.TRUE.equals(theirs.isError()), "another account must not be able to edit it");
+            assertTrue(Boolean.TRUE.equals(theirs.isError()), "another user must not be able to edit it");
 
             CallToolResult done = one.callTool(new CallToolRequest("update_todo", Map.of("id", id, "done", true)));
             assertFalse(Boolean.TRUE.equals(done.isError()));

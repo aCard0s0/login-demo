@@ -55,7 +55,7 @@ class AgentServiceTests {
     @Autowired
     AuthHeaderMigration migration;
 
-    /** Owners are account ids, so every test uses ids of its own and the order they run in cannot matter. */
+    /** Owners are user ids, so every test uses ids of its own and the order they run in cannot matter. */
     private static Caller user(String id) {
         return new Caller(id, "USER");
     }
@@ -79,7 +79,7 @@ class AgentServiceTests {
         assertThrows(ResponseStatusException.class, () -> agents.delete(user("2"), hers.getId()));
 
         assertEquals(Access.READ, agents.get(user("1"), hers.getId()).getServers().get(0).getAccess(),
-                "nothing the other account tried may have stuck");
+                "nothing the other user tried may have stuck");
         assertEquals(1, agents.list(user("1")).size());
     }
 

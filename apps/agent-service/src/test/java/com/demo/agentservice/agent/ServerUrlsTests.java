@@ -31,7 +31,7 @@ class ServerUrlsTests {
 
     final MockEnvironment env = new MockEnvironment()
             .withProperty("agents.todo-mcp-url", "http://todo-service:9082/mcp")
-            .withProperty("agents.trusted-server-urls", " http://account-service:9084/mcp , http://127.0.0.1:9999/fake ");
+            .withProperty("agents.trusted-server-urls", " http://wallet-service:9084/mcp , http://127.0.0.1:9999/fake ");
 
     final ServerUrls urls = new ServerUrls(env, host -> {
         String answer = dns.get(host);
@@ -75,12 +75,12 @@ class ServerUrlsTests {
     @Test
     void theDeploymentsOwnServersAreTrustedExactlyAsWritten() {
         assertEquals("http://todo-service:9082/mcp", urls.clean("http://todo-service:9082/mcp"), "the built-in server is always trusted");
-        assertEquals("http://account-service:9084/mcp", urls.clean("http://account-service:9084/mcp"));
+        assertEquals("http://wallet-service:9084/mcp", urls.clean("http://wallet-service:9084/mcp"));
         assertEquals("http://127.0.0.1:9999/fake", urls.clean("http://127.0.0.1:9999/fake"));
         urls.checkBeforeConnect("http://todo-service:9082/mcp");
         // Exactly: a different port, path or scheme on a trusted host is not the trusted server.
-        refusedAtSave("http://account-service:9085/mcp");
-        refusedAtSave("http://account-service:9084/other");
+        refusedAtSave("http://wallet-service:9085/mcp");
+        refusedAtSave("http://wallet-service:9084/other");
         refusedAtSave("https://todo-service:9082/mcp");
     }
 

@@ -1,8 +1,8 @@
 # login-demo
 
-Multi-module Maven project: four Spring Boot services plus a dependency-free Node frontend. Accounts and
+Multi-module Maven project: four Spring Boot services plus a dependency-free Node frontend. Users and
 logins in one service, todos in another, user-owned agents -- each an MCP server with permissioned tools that
-Claude Code or any MCP client connects to -- in a third, money accounts that users and their agents move funds
+Claude Code or any MCP client connects to -- in a third, wallets that users and their agents move funds
 between in a fourth, and an RS256 token handoff between them instead of a per-request call.
 
 ```
@@ -15,10 +15,10 @@ docker/initdb.sql       one database and one role per service
 libs/auth-client        verifying those tokens: the one copy the three services below share
 libs/web-errors         the {error} body every service answers a rejection with
 libs/mcp-server         the stateless /mcp endpoint and tool-argument parsing
-apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
-apps/todo-service       per-account todos, and their MCP server  :9082
+apps/auth-service       users, login, OAuth, roles, tokens       :9081
+apps/todo-service       per-user todos, and their MCP server     :9082
 apps/agent-service      agents, their MCP servers, permissions   :9083
-apps/account-service    money accounts, transfers, agent grants  :9084
+apps/wallet-service     wallets, transfers, agent grants         :9084
 apps/web                static pages + /api and /mcp proxy      :3000
 ```
 
@@ -26,14 +26,28 @@ Each service documents itself:
 
 | | What it owns | README |
 |---|---|---|
-| auth-service | accounts, passwords, roles, OAuth sign-in, the signing key | [apps/auth-service](apps/auth-service/README.md) |
+| auth-service | users, passwords, roles, OAuth sign-in, the signing key | [apps/auth-service](apps/auth-service/README.md) |
 | todo-service | todos, verifying tokens locally, and the `/mcp` server agents reach them through | [apps/todo-service](apps/todo-service/README.md) |
 | agent-service | agents as MCP servers: the servers each may use, READ/WRITE enforced per tool call | [apps/agent-service](apps/agent-service/README.md) |
-| account-service | money accounts for users and their agents, transfers, READ/WRITE grants per agent, and its `/mcp` | [apps/account-service](apps/account-service/README.md) |
+| wallet-service | wallets for users and their agents, transfers, READ/WRITE grants per agent, and its `/mcp` | [apps/wallet-service](apps/wallet-service/README.md) |
 | web | the pages and the one-origin proxy | [apps/web](apps/web/README.md) |
-| auth-client | `JwtVerifier`, `Revocations` and `Caller`: a plain jar, no service, that todo-, agent- and account-service depend on | [libs/auth-client](libs/auth-client/README.md) |
+| auth-client | `JwtVerifier`, `Revocations` and `Caller`: a plain jar, no service, that todo-, agent- and wallet-service depend on | [libs/auth-client](libs/auth-client/README.md) |
 | web-errors | `ErrorBodyAdvice`: every rejection, MVC's own included, as `{"error": "..."}`; all four services extend it | [libs/web-errors](libs/web-errors/README.md) |
-| mcp-server | `McpEndpoint` and `Args`: the `/mcp` servlet todo- and account-service serve their tools through, and exact argument parsing agent-service shares too | [libs/mcp-server](libs/mcp-server/README.md) |
+| mcp-server | `McpEndpoint` and `Args`: the `/mcp` servlet todo- and wallet-service serve their tools through, and exact argument parsing agent-service shares too | [libs/mcp-server](libs/mcp-server/README.md) |
+
+## Glossary
+
+One word per concept, the same word in classes, tables, URLs and pages. "Account" is none of them:
+`./login-demo test` refuses an `Account` or `accountId` identifier.
+
+| Concept | Name | Lives in |
+|---|---|---|
+| Someone who logs in, with role `ADMIN`, `MODERATOR` or `USER` | **User** | auth-service |
+| An MCP server a user owns, connected to with a token pinned to it | **Agent** | agent-service |
+| Money a user holds, optionally opened for one of their agents | **Wallet** | wallet-service |
+| An agent's READ or WRITE right on a wallet it does not own | **Grant** | wallet-service |
+| An agent's READ or WRITE on one of its MCP servers | **Access** | agent-service |
+| One movement of money, deposits included | **Transfer** | wallet-service |
 
 ## Package convention
 
@@ -43,8 +57,8 @@ to one subject stays inside one folder. Each service README has its own tree.
 
 Two rules hold across all of them:
 
-- **The arrows point one way.** `token` knows nothing about accounts (it signs an id, an email, a name and a
-  role -- not an `Account`), `account` uses `token` to resolve a caller, and `session` uses both to turn a
+- **The arrows point one way.** `token` knows nothing about users (it signs an id, an email, a name and a
+  role -- not a `User`), `user` uses `token` to resolve a caller, and `session` uses both to turn a
   password into one. The verifying half of `token` lives once, in the `libs/auth-client` library, and the three
   services that check tokens in process depend on it rather than carrying a copy each.
 - **`stats` is the unauthenticated corner** of each service, kept apart so the trust boundary is visible in
@@ -59,7 +73,7 @@ cp .env.example .env      # then change the admin password
 ./login-demo start
 ```
 
-Open http://localhost:3000. Six containers: `db`, `auth-service`, `todo-service`, `agent-service`, `account-service`, `web`.
+Open http://localhost:3000. Six containers: `db`, `auth-service`, `todo-service`, `agent-service`, `wallet-service`, `web`.
 
 `./login-demo` with no arguments prints every command it has; `./login-demo <command> --help` explains one.
 The ones worth knowing: `dev` runs the stack in the foreground, `status` and `logs` say what it is doing,
@@ -81,18 +95,18 @@ docker compose up -d db
 java -jar apps/auth-service/target/auth-service-0.0.1-SNAPSHOT.jar &
 java -jar apps/todo-service/target/todo-service-0.0.1-SNAPSHOT.jar &
 java -jar apps/agent-service/target/agent-service-0.0.1-SNAPSHOT.jar &
-java -jar apps/account-service/target/account-service-0.0.1-SNAPSHOT.jar &
+java -jar apps/wallet-service/target/wallet-service-0.0.1-SNAPSHOT.jar &
 node apps/web/server.js
 ```
 
 ### Databases
 
 Postgres, with a database and a role per service (`auth`/`auth`, `todo`/`todo`, `agent`/`agent`,
-`account`/`account`, created by `docker/initdb.sql`), so no service can read another's tables even by accident. The credentials are
+`wallet`/`wallet`, created by `docker/initdb.sql`), so no service can read another's tables even by accident. The credentials are
 development values and the `db` container publishes no port; change them before this goes anywhere real.
 
 `docker/initdb.sql` runs only when the volume is created. A stack that predates agent-service or
-account-service lacks their databases, so either start over with `./login-demo db reset` or add them to the
+wallet-service lacks their databases, so either start over with `./login-demo db reset` or add them to the
 volume you have:
 
 ```bash
@@ -100,7 +114,7 @@ volume you have:
 ```
 
 ```bash
-./login-demo exec db psql -U postgres -c "CREATE USER account WITH PASSWORD 'account';" -c "CREATE DATABASE account OWNER account;"
+./login-demo exec db psql -U postgres -c "CREATE USER wallet WITH PASSWORD 'wallet';" -c "CREATE DATABASE wallet OWNER wallet;"
 ```
 
 Tests are the exception: they run against a throwaway SQLite file so `./mvnw test` needs nothing installed
@@ -117,7 +131,7 @@ measured idle after `verify`:
 | auth-service | 288m | ~205 MiB (71%) | 1.0 |
 | todo-service | 288m | ~206 MiB (71%) | 1.0 |
 | agent-service | 320m | ~217 MiB (68%) | 1.0 |
-| account-service | 288m | not yet measured | 1.0 |
+| wallet-service | 288m | not yet measured | 1.0 |
 | db | 192m | ~68 MiB (35%) | 0.5 |
 | web | 64m | ~18 MiB (27%) | 0.5 |
 
@@ -141,7 +155,8 @@ docker inspect login-demo-auth-service-1 --format '{{.State.OOMKilled}}'
 
 ## Roles
 
-Four of them, on the account row and carried in the token: `ADMIN`, `MODERATOR`, `AGENT`, `USER`.
+Three on the user row and carried in the token -- `ADMIN`, `MODERATOR`, `USER` -- plus `AGENT`, which only
+ever appears on a token.
 
 | | read own | write own | read everyone | write everyone | change roles |
 |---|---|---|---|---|---|
@@ -150,7 +165,7 @@ Four of them, on the account row and carried in the token: `ADMIN`, `MODERATOR`,
 | **AGENT** | yes | yes | no | no | no |
 | **USER** | yes | yes | no | no | no |
 
-`AGENT` behaves exactly like `USER` and is never on an account row: it is the role stamped on the long-lived
+`AGENT` is not a user role and is never on a user row: it is the role stamped on the long-lived
 token minted for one of a user's agents, with the owner as subject, so a connecting agent acts as its owner
 and nothing more. See [Agents](#agents).
 
@@ -158,36 +173,36 @@ Endpoint by endpoint:
 
 | Service | Endpoint | ADMIN | MODERATOR | AGENT | USER |
 |---|---|---|---|---|---|
-| auth | `GET`/`PUT /api/accounts/me` | own | own | 403 | own |
-| auth | `GET /api/accounts` | everyone | everyone | 403 | 403 |
-| auth | `PUT /api/accounts/{id}/role` | any account | 403 | 403 | 403 |
-| auth | `PUT /api/accounts/{id}/suspended` · `POST /api/accounts/{id}/revoke` | any account | 403 | 403 | 403 |
+| auth | `GET`/`PUT /api/users/me` | own | own | 403 | own |
+| auth | `GET /api/users` | everyone | everyone | 403 | 403 |
+| auth | `PUT /api/users/{id}/role` | any user | 403 | 403 | 403 |
+| auth | `PUT /api/users/{id}/suspended` · `POST /api/users/{id}/revoke` | any user | 403 | 403 | 403 |
 | todo | `GET /api/todos` | everyone's | everyone's | 403; over MCP its owner's | own |
 | todo | `POST /api/todos` | own | own | 403; over MCP its owner's, if WRITE | own |
 | todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | 403; over MCP its owner's, if WRITE | own |
 | agent | everything under `/api/agents` | own | own | 403 | own |
-| account | `GET /api/bank/accounts` · `GET .../{id}` · `GET .../{id}/transfers` | everyone's | everyone's | 403; over MCP its own + granted | own + its agents' |
-| account | `POST /api/bank/accounts/{id}/transfers` | anyone's | own, else 404 | 403; over MCP its own + WRITE grants | own + its agents' |
-| account | `POST /api/bank/accounts` · `.../deposit` · `PUT`/`DELETE .../permissions/{agentId}` | anyone's | own, else 404 | 403 | own + its agents' |
+| wallet | `GET /api/wallets` · `GET .../{id}` · `GET .../{id}/transfers` | everyone's | everyone's | 403; over MCP its own + granted | own + its agents' |
+| wallet | `POST /api/wallets/{id}/transfers` | anyone's | own, else 404 | 403; over MCP its own + WRITE grants | own + its agents' |
+| wallet | `POST /api/wallets` · `.../deposit` · `PUT`/`DELETE .../grants/{agentId}` | anyone's | own, else 404 | 403 | own + its agents' |
 
 A todo -- or an agent -- belonging to someone else comes back **404, not 403**, so neither answer says whether
-it exists. Agents are the one thing no role sees across accounts, an admin included.
+it exists. Agents are the one thing no role sees across users, an admin included.
 
 **An agent token is 403 on every `/api` endpoint, in every service.** Its only way in is `/mcp` through
 agent-service, where the agent's READ/WRITE setting and activity log apply; over REST a READ agent could
 delete a todo with its 30-day token, or change its owner's password, and skip both. The MCP endpoints of
-todo-service and account-service are the one place an agent token is good, and only agent-service reaches
+todo-service and wallet-service are the one place an agent token is good, and only agent-service reaches
 them. The endpoints that take no token at all -- registration, login, the OAuth redirects, `/api/public/*`,
 `/api/jwks.json` -- are unaffected, since there is no token to refuse.
 
-Registration always produces a `USER` -- `POST /api/accounts` has no role field to ask with, and
-`PUT /api/accounts/me` cannot change one. `PUT /api/accounts/{id}/role` is the single door off `USER`, and
+Registration always produces a `USER` -- `POST /api/users` has no role field to ask with, and
+`PUT /api/users/me` cannot change one. `PUT /api/users/{id}/role` is the single door off `USER`, and
 only an admin may open it. An admin cannot demote itself, because the last one doing so would leave nobody
 able to promote anybody ever again.
 
 The two services answer "what role is this?" differently, on purpose:
 
-- **auth-service reads the account row** on every request, so a promotion or demotion bites at once, on a
+- **auth-service reads the user row** on every request, so a promotion or demotion bites at once, on a
   token the holder already has.
 - **todo-service reads the token's claim**, because asking auth-service per request is exactly what the
   JWKS handoff exists to avoid. A role change lands there when the token is renewed -- within
@@ -195,27 +210,27 @@ The two services answer "what role is this?" differently, on purpose:
 
 ### Suspending and revoking
 
-From `/admin`, an admin can **suspend** an account (it cannot log in, by password or provider, and every
+From `/admin`, an admin can **suspend** a user (it cannot log in, by password or provider, and every
 token it holds dies, until it is reactivated) or **revoke its access** (every token it holds dies; it can
 log straight back in). An admin cannot suspend itself.
 
-Both work through a per-account token version, stamped into every token as `ver` and bumped on revoke or
+Both work through a per-user token version, stamped into every token as `ver` and bumped on revoke or
 suspend. auth-service compares it on every request, so both bite there at once. todo-, agent- and
-account-service poll `/internal/token-versions` at most every 10 seconds and turn away any token older than
-the account's last revocation. That path is outside `/api`, so the web proxy never forwards it; if
+wallet-service poll `/internal/token-versions` at most every 10 seconds and turn away any token older than
+the user's last revocation. That path is outside `/api`, so the web proxy never forwards it; if
 auth-service is unreachable they keep the last list they had.
 
 An owner can also revoke **one agent's tokens** alone, with **Revoke tokens** on the agent's page
 (`POST /api/agents/{id}/token/revoke`). That bumps a per-agent version auth-service keeps and stamps into
 agent tokens as `agentVer`; the same feed publishes it under `agent:<id>`, so an agent key can never collide
-with an account id. The owner's login and their other agents are untouched. An agent token minted before
+with a user id. The owner's login and their other agents are untouched. An agent token minted before
 `agentVer` existed is refused outright, since it cannot be told from a revoked one.
 
-An admin changing *another* account's name, email or password is deliberately not implemented: editing an
-account requires its current password, and bypassing that would be account takeover rather than
+An admin changing *another* user's name, email or password is deliberately not implemented: editing a
+user requires their current password, and bypassing that would be impersonation rather than
 administration.
 
-### The admin account
+### The admin user
 
 Seeded into auth-service's database at startup from `ADMIN_EMAIL` and `ADMIN_PASSWORD`, which compose reads
 from `.env`. `.env` is gitignored; `.env.example` is the committed stand-in. Compose refuses to start the
@@ -224,7 +239,7 @@ stack if either value is missing, rather than coming up with nobody in charge --
 
 Seeding is **create-only**: an address that already exists is promoted to `ADMIN`, but its password is left
 exactly as it is, so a restart cannot quietly reset a password the admin has since changed and a stale
-`.env` cannot hand the account back. Change it from `/account` like any other account; to start over,
+`.env` cannot hand the admin back. Change it from `/profile` like any other user; to start over,
 `./login-demo down --volumes`.
 
 Details, including why it is not in `docker/initdb.sql`, are in the
@@ -244,7 +259,7 @@ claude mcp add --transport http todos "http://localhost:3000/mcp?agent=<id>" --h
 The token is either the owner's own login token (30 minutes) or one made with **Create token** on the
 agent's page: minted by auth-service with role `AGENT`, the owner as subject and the agent pinned by claim,
 good for 30 days, shown once, and killed early by **Revoke tokens** on that page (this agent's alone) or by
-**Revoke access** on the account (every token the owner holds).
+**Revoke access** on the user from `/admin` (every token the owner holds).
 Step by step, for Claude Code, Cursor, VS Code and plain curl: [docs/connect-an-agent.md](docs/connect-an-agent.md).
 
 The permission is the service's, not the connecting agent's. **READ** offers only the tools that only read
@@ -285,14 +300,14 @@ Register `http://localhost:3000/api/oauth/<provider>/callback` as the callback U
 exactly as written. Serving the frontend from another address means changing `OAUTH_REDIRECT_BASE_URL` and
 the registered URI together -- a provider rejects a `redirect_uri` it does not already know.
 
-**Signing up and logging in are the same button.** A provider identity is matched to an account by
-*verified* email: if that address is already registered it is that account, password login and all;
-otherwise an account is created for it. An unverified address is refused, since accepting one would let
-anyone who can claim an address at a provider walk into the account that already owns it here.
+**Signing up and logging in are the same button.** A provider identity is matched to a user by
+*verified* email: if that address is already registered it is that user, password login and all;
+otherwise a user is created for it. An unverified address is refused, since accepting one would let
+anyone who can claim an address at a provider walk into the user that already owns it here.
 
 The flow is the OAuth 2.0 authorization-code flow written out by hand rather than
 `spring-boot-starter-oauth2-client`, which would install the security filter chain these services
-deliberately do not have. The state-cookie guard, the fragment handoff, and why an account created this way
+deliberately do not have. The state-cookie guard, the fragment handoff, and why a user created this way
 has no usable password are in the
 [auth-service README](apps/auth-service/README.md#signing-in-with-google-or-github).
 
@@ -308,8 +323,8 @@ The consequences worth knowing:
 
 - **There is no logout endpoint.** A signed token is good until it expires; logging out is the browser
   dropping the token it holds. `auth.token-ttl` (default 30m) is the real bound -- unless an admin revokes
-  the account's tokens, see [Suspending and revoking](#suspending-and-revoking).
-- **A restart invalidates every token in flight**, because it mints a new keypair. Accounts and todos are
+  the user's tokens, see [Suspending and revoking](#suspending-and-revoking).
+- **A restart invalidates every token in flight**, because it mints a new keypair. Users and todos are
   not affected. Nothing is written to disk, so there is no private key in this repo to leak.
 - The key carries a `kid`, so adding a second key later is additive rather than a breaking change.
 
@@ -317,14 +332,14 @@ The consequences worth knowing:
 
 | Service | Method | Path | Token |
 |---|---|---|---|
-| auth | POST | `/api/accounts` | no -- this is registration |
+| auth | POST | `/api/users` | no -- this is registration |
 | auth | POST | `/api/login` | no |
-| auth | GET · PUT | `/api/accounts/me` | yes -- user tokens only; an agent token is 403 on all of `/api/accounts` |
-| auth | GET | `/api/accounts` | yes -- admin and moderator only |
-| auth | PUT | `/api/accounts/{id}/role` | yes -- admin only |
-| auth | PUT | `/api/accounts/{id}/suspended` | yes -- admin only |
-| auth | POST | `/api/accounts/{id}/revoke` | yes -- admin only |
-| auth | GET | `/internal/token-versions` | no -- compose network only, never proxied; accounts by id, agents as `agent:<id>` |
+| auth | GET · PUT | `/api/users/me` | yes -- user tokens only; an agent token is 403 on all of `/api/users` |
+| auth | GET | `/api/users` | yes -- admin and moderator only |
+| auth | PUT | `/api/users/{id}/role` | yes -- admin only |
+| auth | PUT | `/api/users/{id}/suspended` | yes -- admin only |
+| auth | POST | `/api/users/{id}/revoke` | yes -- admin only |
+| auth | GET | `/internal/token-versions` | no -- compose network only, never proxied; users by id, agents as `agent:<id>` |
 | auth | POST | `/internal/agent-tokens` · `/internal/agent-tokens/{agentId}/revoke` | `X-Internal-Secret` -- compose network only, never proxied; agent-service asks |
 | auth | GET | `/api/oauth/providers` | no |
 | auth | GET | `/api/oauth/{provider}/start` · `/callback` | no -- 302s the browser walks through |
@@ -342,30 +357,30 @@ The consequences worth knowing:
 | agent | POST | `/api/agents/{id}/token/revoke` | yes -- owner only; kills every token made for this one agent |
 | agent | POST | `/mcp?agent={id}` | yes -- MCP; owner's token or the agent's own; proxied |
 | agent | GET | `/api/public/agents/stats` | no |
-| account | GET · POST | `/api/bank/accounts` | yes -- user tokens only; an agent token is 403 on all of `/api/bank` |
-| account | GET | `/api/bank/accounts/{id}` · `/api/bank/accounts/{id}/transfers` | yes |
-| account | POST | `/api/bank/accounts/{id}/deposit` | yes -- owner or admin, never an agent token |
-| account | POST | `/api/bank/accounts/{id}/transfers` | yes -- owner or admin; an agent transfers over MCP only |
-| account | PUT · DELETE | `/api/bank/accounts/{id}/permissions/{agentId}` | yes -- owner or admin |
-| account | POST | `/mcp` | yes -- MCP, agent tokens only, compose network only, never proxied |
-| account | GET | `/api/public/bank/stats` | no |
+| wallet | GET · POST | `/api/wallets` | yes -- user tokens only; an agent token is 403 on all of `/api/wallets` |
+| wallet | GET | `/api/wallets/{id}` · `/api/wallets/{id}/transfers` | yes |
+| wallet | POST | `/api/wallets/{id}/deposit` | yes -- owner or admin, never an agent token |
+| wallet | POST | `/api/wallets/{id}/transfers` | yes -- owner or admin; an agent transfers over MCP only |
+| wallet | PUT · DELETE | `/api/wallets/{id}/grants/{agentId}` | yes -- owner or admin |
+| wallet | POST | `/mcp` | yes -- MCP, agent tokens only, compose network only, never proxied |
+| wallet | GET | `/api/public/wallets/stats` | no |
 
 Request and response bodies are in each service's README:
 [auth-service](apps/auth-service/README.md#endpoints), [todo-service](apps/todo-service/README.md#endpoints),
-[agent-service](apps/agent-service/README.md#endpoints), [account-service](apps/account-service/README.md#endpoints).
+[agent-service](apps/agent-service/README.md#endpoints), [wallet-service](apps/wallet-service/README.md#endpoints).
 
 The token travels in the `Authorization: Bearer <token>` header rather than a query parameter so it stays
 out of access logs and Referer headers. Rejected input comes back as `{"error": "..."}` from both services,
 which is what the pages render.
 
-The Node server proxies `/mcp`, `/api/agents*` and `/api/public/agents*` to agent-service, `/api/bank*` and
-`/api/public/bank*` to account-service (whole path segments, so `/api/banking` is not the bank's), `/api/todos*` and `/api/public/todos*` to todo-service and the rest of
+The Node server proxies `/mcp`, `/api/agents*` and `/api/public/agents*` to agent-service, `/api/wallets*` and
+`/api/public/wallets*` to wallet-service (whole path segments, so `/api/wallets-archive` is not wallet-service's), `/api/todos*` and `/api/public/todos*` to todo-service and the rest of
 `/api/*` to auth-service, so the browser stays on
 one origin, no service needs CORS config, and an external agent reaches `/mcp` through the same port.
 
 Ports 9081-9084 rather than 8081-8084: Docker holds those on this machine. Override with `server.port`, and
-point the frontend elsewhere with `AUTH_URL` / `TODO_URL` / `AGENT_URL` / `ACCOUNT_URL`. todo-service,
-agent-service and account-service find the signing key through `auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations
+point the frontend elsewhere with `AUTH_URL` / `TODO_URL` / `AGENT_URL` / `WALLET_URL`. todo-service,
+agent-service and wallet-service find the signing key through `auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations
 through `auth.token-versions-uri` (`AUTH_TOKEN_VERSIONS_URI`); agent-service finds the built-in todo MCP
 server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`), the other servers it may reach by compose name
 through `agents.trusted-server-urls` (`AGENTS_TRUSTED_SERVER_URLS`) and the token minter through

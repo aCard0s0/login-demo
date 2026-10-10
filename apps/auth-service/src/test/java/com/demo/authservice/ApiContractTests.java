@@ -38,7 +38,7 @@ class ApiContractTests {
     MockMvc mvc;
 
     private String register(String name, String email, String password) throws Exception {
-        mvc.perform(post("/api/accounts").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(json(name, email, password)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").isNumber())
@@ -58,9 +58,9 @@ class ApiContractTests {
         return body.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1");
     }
 
-    /** The id behind a token, which is the only way this test can name an account it did not seed. */
+    /** The id behind a token, which is the only way this test can name a user it did not seed. */
     private long idOf(String token) throws Exception {
-        String body = mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
+        String body = mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return Long.parseLong(body.replaceAll(".*\"id\"\\s*:\\s*(\\d+).*", "$1"));
@@ -81,7 +81,7 @@ class ApiContractTests {
 
         assertEquals(3, token.split("\\.").length, "a JWT is header.payload.signature");
 
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("ada@example.com"))
                 .andExpect(jsonPath("$.name").value("Ada"));
@@ -89,29 +89,29 @@ class ApiContractTests {
 
     @Test
     void aMissingOrBrokenTokenIs401InTheErrorShape() throws Exception {
-        mvc.perform(get("/api/accounts/me"))
+        mvc.perform(get("/api/users/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").isString());
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer nonsense"))
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer nonsense"))
                 .andExpect(status().isUnauthorized());
 
         String token = register("Grace", "grace@example.com", "hopper-1906");
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token.substring(0, token.length() - 2)))
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token.substring(0, token.length() - 2)))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
-    void editingAnAccountNeedsTheCurrentPassword() throws Exception {
+    void editingAUserNeedsTheCurrentPassword() throws Exception {
         String token = register("Edna", "edna@example.com", "edna-pass-01");
 
-        mvc.perform(put("/api/accounts/me").header("Authorization", "Bearer " + token)
+        mvc.perform(put("/api/users/me").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Edna Mode","email":"edna.mode@example.com","currentPassword":"wrong"}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("current password is wrong"));
 
-        mvc.perform(put("/api/accounts/me").header("Authorization", "Bearer " + token)
+        mvc.perform(put("/api/users/me").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Edna Mode","email":"edna.mode@example.com","currentPassword":"edna-pass-01"}"""))
@@ -126,22 +126,22 @@ class ApiContractTests {
     void rejectedInputComesBackAs400AndTheErrorShape() throws Exception {
         register("Alonzo", "alonzo@example.com", "church-1903");
 
-        mvc.perform(post("/api/accounts").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(json("Alonzo again", "alonzo@example.com", "church-1903")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("that email is already registered"));
 
-        mvc.perform(post("/api/accounts").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(json("Short", "short@example.com", "tiny")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").isString());
 
         // Rejections MVC itself makes -- a body that will not parse, an id that is not a number, a path that
         // does not exist -- must come back in the same shape, not as Spring's ProblemDetail.
-        mvc.perform(post("/api/accounts").contentType(MediaType.APPLICATION_JSON).content("{not json"))
+        mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content("{not json"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").isString());
-        mvc.perform(put("/api/accounts/not-a-number/role").header("Authorization", "Bearer x")
+        mvc.perform(put("/api/users/not-a-number/role").header("Authorization", "Bearer x")
                         .contentType(MediaType.APPLICATION_JSON).content(role("ADMIN")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").isString());
@@ -149,7 +149,7 @@ class ApiContractTests {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").isString());
         // The admin page shows this text, so an unknown role has to say what the known ones are.
-        mvc.perform(put("/api/accounts/1/role").header("Authorization", "Bearer x")
+        mvc.perform(put("/api/users/1/role").header("Authorization", "Bearer x")
                         .contentType(MediaType.APPLICATION_JSON).content(role("KING")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error", containsString("MODERATOR")));
@@ -178,7 +178,7 @@ class ApiContractTests {
 
         mvc.perform(get("/api/public/stats"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.accounts", greaterThanOrEqualTo(1)));
+                .andExpect(jsonPath("$.users", greaterThanOrEqualTo(1)));
 
         mvc.perform(get("/api/jwks.json"))
                 .andExpect(status().isOk())
@@ -194,64 +194,64 @@ class ApiContractTests {
         String user = register("Mary", "mary@example.com", "jackson-1921");
         long maryId = idOf(user);
 
-        mvc.perform(get("/api/accounts").header("Authorization", "Bearer " + user))
+        mvc.perform(get("/api/users").header("Authorization", "Bearer " + user))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").isString());
-        mvc.perform(put("/api/accounts/" + maryId + "/role").header("Authorization", "Bearer " + user)
+        mvc.perform(put("/api/users/" + maryId + "/role").header("Authorization", "Bearer " + user)
                         .contentType(MediaType.APPLICATION_JSON).content(role("ADMIN")))
                 .andExpect(status().isForbidden());
-        mvc.perform(put("/api/accounts/" + maryId + "/role")
+        mvc.perform(put("/api/users/" + maryId + "/role")
                         .contentType(MediaType.APPLICATION_JSON).content(role("ADMIN")))
                 .andExpect(status().isUnauthorized());
 
-        mvc.perform(put("/api/accounts/" + maryId + "/role").header("Authorization", "Bearer " + admin)
+        mvc.perform(put("/api/users/" + maryId + "/role").header("Authorization", "Bearer " + admin)
                         .contentType(MediaType.APPLICATION_JSON).content(role("MODERATOR")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.role").value("MODERATOR"));
 
-        // The role is read from the account, not from the claims, so the token Mary already holds is enough.
-        mvc.perform(get("/api/accounts").header("Authorization", "Bearer " + user))
+        // The role is read from the user, not from the claims, so the token Mary already holds is enough.
+        mvc.perform(get("/api/users").header("Authorization", "Bearer " + user))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").isNumber())
                 .andExpect(jsonPath("$[0].passwordHash").doesNotExist());
 
-        mvc.perform(put("/api/accounts/" + idOf(admin) + "/role").header("Authorization", "Bearer " + admin)
+        mvc.perform(put("/api/users/" + idOf(admin) + "/role").header("Authorization", "Bearer " + admin)
                         .contentType(MediaType.APPLICATION_JSON).content(role("USER")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").isString());
     }
 
     @Test
-    void onlyAnAdminSuspendsOrRevokesAndASuspendedAccountCannotLogIn() throws Exception {
+    void onlyAnAdminSuspendsOrRevokesAndASuspendedUserCannotLogIn() throws Exception {
         String admin = login("admin@example.com", "admin-pass-01");
         String user = register("Hedy", "hedy@example.com", "lamarr-1914");
         long hedyId = idOf(user);
 
-        mvc.perform(put("/api/accounts/" + hedyId + "/suspended").header("Authorization", "Bearer " + user)
+        mvc.perform(put("/api/users/" + hedyId + "/suspended").header("Authorization", "Bearer " + user)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"suspended\":true}"))
                 .andExpect(status().isForbidden());
-        mvc.perform(post("/api/accounts/" + hedyId + "/revoke").header("Authorization", "Bearer " + user))
+        mvc.perform(post("/api/users/" + hedyId + "/revoke").header("Authorization", "Bearer " + user))
                 .andExpect(status().isForbidden());
 
-        mvc.perform(put("/api/accounts/" + hedyId + "/suspended").header("Authorization", "Bearer " + admin)
+        mvc.perform(put("/api/users/" + hedyId + "/suspended").header("Authorization", "Bearer " + admin)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"suspended\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.suspended").value(true));
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + user))
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + user))
                 .andExpect(status().isUnauthorized());
         mvc.perform(post("/api/login").contentType(MediaType.APPLICATION_JSON)
                         .content(json(null, "hedy@example.com", "lamarr-1914")))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("this account is suspended"));
+                .andExpect(jsonPath("$.error").value("this user is suspended"));
 
-        mvc.perform(put("/api/accounts/" + hedyId + "/suspended").header("Authorization", "Bearer " + admin)
+        mvc.perform(put("/api/users/" + hedyId + "/suspended").header("Authorization", "Bearer " + admin)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"suspended\":false}"))
                 .andExpect(jsonPath("$.suspended").value(false));
         String again = login("hedy@example.com", "lamarr-1914");
 
-        mvc.perform(post("/api/accounts/" + hedyId + "/revoke").header("Authorization", "Bearer " + admin))
+        mvc.perform(post("/api/users/" + hedyId + "/revoke").header("Authorization", "Bearer " + admin))
                 .andExpect(status().isOk());
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + again))
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + again))
                 .andExpect(status().isUnauthorized());
         mvc.perform(get("/internal/token-versions"))
                 .andExpect(status().isOk())
@@ -266,15 +266,15 @@ class ApiContractTests {
 
         // Being on the network is not enough: without the shared secret nothing is minted.
         mvc.perform(post("/internal/agent-tokens").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                        .content("{\"userId\":" + adaId + ",\"agentId\":42}"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("internal secret missing or wrong"));
         mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "wrong").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                        .content("{\"userId\":" + adaId + ",\"agentId\":42}"))
                 .andExpect(status().isForbidden());
 
         String body = mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                        .content("{\"userId\":" + adaId + ",\"agentId\":42}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isString())
                 .andReturn().getResponse().getContentAsString();
@@ -288,7 +288,7 @@ class ApiContractTests {
         assertEquals(29, days, "30 days, minus the seconds this test took");
 
         // Revoking one agent bumps its version alone: the feed says so under agent:<id>, the next token carries it,
-        // and the owner's own account is not in the feed at all.
+        // and the owner themselves is not in the feed at all.
         mvc.perform(post("/internal/agent-tokens/42/revoke")).andExpect(status().isForbidden());
         mvc.perform(post("/internal/agent-tokens/42/revoke").header("X-Internal-Secret", "test-internal-secret"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1));
@@ -296,32 +296,32 @@ class ApiContractTests {
                 .andExpect(jsonPath("$['agent:42']").value(1))
                 .andExpect(jsonPath("$['" + adaId + "']").doesNotExist());
         String fresh = mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret")
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"userId\":" + adaId + ",\"agentId\":42}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertEquals(1L, com.nimbusds.jwt.SignedJWT.parse(fresh.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1"))
                 .getJWTClaimsSet().getLongClaim("agentVer"));
 
-        // Its only way in is /mcp: here it could edit its owner's account, so every /api endpoint answers it 403.
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
+        // Its only way in is /mcp: here it could edit its owner's profile, so every /api endpoint answers it 403.
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("an agent token can only connect to /mcp"));
-        mvc.perform(put("/api/accounts/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(put("/api/users/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"Taken","email":"taken@example.com","currentPassword":"lovelace-1815","newPassword":"taken-over-1"}"""))
                 .andExpect(status().isForbidden());
-        mvc.perform(get("/api/accounts").header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + ada))
+        mvc.perform(get("/api/users").header("Authorization", "Bearer " + token)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + ada))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.email").value("ada-agent@example.com"));
         login("ada-agent@example.com", "lovelace-1815");
         // And a revoke kills it like any other: dead first, so a revoked agent token is 401, not 403.
         String admin = login("admin@example.com", "admin-pass-01");
-        mvc.perform(post("/api/accounts/" + adaId + "/revoke").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/users/" + adaId + "/revoke").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
 
         mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"accountId\":999999,\"agentId\":1}"))
-                .andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("account not found"));
+                        .content("{\"userId\":999999,\"agentId\":1}"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.error").value("user not found"));
         mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"accountId\":" + adaId + "}"))
+                        .content("{\"userId\":" + adaId + "}"))
                 .andExpect(status().isBadRequest());
     }
 }

@@ -5,18 +5,18 @@ const PORT = process.env.PORT || 3000;
 const AUTH = process.env.AUTH_URL || 'http://localhost:9081';
 const TODO = process.env.TODO_URL || 'http://localhost:9082';
 const AGENT = process.env.AGENT_URL || 'http://localhost:9083';
-const ACCOUNT = process.env.ACCOUNT_URL || 'http://localhost:9084';
+const WALLET = process.env.WALLET_URL || 'http://localhost:9084';
 
 // Clean URL -> file under public/. A closed set, so no request can walk its way out of the folder.
 const PAGES = {
   '/': 'index.html',
   '/login': 'login.html',
   '/todos': 'todos.html',
-  '/account': 'account.html',
+  '/profile': 'profile.html',
   '/admin': 'admin.html',
   '/agents': 'agents.html',
   '/agent': 'agent.html',
-  '/bank': 'bank.html',
+  '/wallets': 'wallets.html',
 };
 const ASSETS = {
   '/app.js': ['app.js', 'text/javascript'],
@@ -46,12 +46,12 @@ createServer(async (req, res) => {
   // /api/../internal cannot ride through as /api and be resolved upstream to a path never meant to be public.
   const { pathname: path, search } = new URL(req.url, 'http://web');
   // Agents, their public count and the MCP endpoint an external agent connects to live in agent-service, the
-  // money accounts and their public count in account-service, the private todos and the public todo count in
+  // wallets and their public count in wallet-service, the private todos and the public todo count in
   // todo-service; everything else is auth-service.
-  // Whole path segments, so /api/banking is not /api/bank.
+  // Whole path segments, so /api/wallets-archive is not /api/wallets.
   const under = (prefix) => path === prefix || path.startsWith(prefix + '/');
   if (path === '/mcp' || under('/api/agents') || under('/api/public/agents')) return proxy(req, res, AGENT, path + search);
-  if (under('/api/bank') || under('/api/public/bank')) return proxy(req, res, ACCOUNT, path + search);
+  if (under('/api/wallets') || under('/api/public/wallets')) return proxy(req, res, WALLET, path + search);
   if (under('/api/todos') || under('/api/public/todos')) return proxy(req, res, TODO, path + search);
   if (path.startsWith('/api/')) return proxy(req, res, AUTH, path + search);
 
@@ -63,4 +63,4 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404).end('not found');
   }
-}).listen(PORT, () => console.log(`web     -> http://localhost:${PORT}\nauth    -> ${AUTH}\ntodo    -> ${TODO}\nagent   -> ${AGENT}\naccount -> ${ACCOUNT}`));
+}).listen(PORT, () => console.log(`web     -> http://localhost:${PORT}\nauth    -> ${AUTH}\ntodo    -> ${TODO}\nagent   -> ${AGENT}\nwallet  -> ${WALLET}`));
