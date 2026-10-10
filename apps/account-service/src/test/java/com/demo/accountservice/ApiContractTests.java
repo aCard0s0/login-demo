@@ -156,7 +156,7 @@ class ApiContractTests {
         bank.setPermission(GRANTER, shared, HELPER.agentId(), Access.WRITE);
 
         call(get(BASE), "helper", null).andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("an agent token can only reach the accounts over MCP"));
+                .andExpect(jsonPath("$.error").value("an agent token can only connect to /mcp"));
         call(get(BASE + "/" + shared), "helper", null).andExpect(status().isForbidden());
         call(get(BASE + "/" + shared + "/transfers"), "helper", null).andExpect(status().isForbidden());
         call(post(BASE + "/" + shared + "/transfers"), "helper", "{\"to\":" + elsewhere + ",\"amount\":10}").andExpect(status().isForbidden());

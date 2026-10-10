@@ -57,7 +57,7 @@ class ApiContractTests {
 
         mvc.perform(get("/api/todos")).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error").value("invalid or expired token"));
 
-        String refused = "an agent token can only reach the todos over MCP";
+        String refused = "an agent token can only connect to /mcp";
         mvc.perform(get("/api/todos").header("Authorization", "Bearer agent"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value(refused));
         mvc.perform(post("/api/todos").header("Authorization", "Bearer agent").contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"smuggled\"}"))
