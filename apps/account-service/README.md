@@ -47,7 +47,11 @@ An account has an `owner` (a user id) and, optionally, the `agentId` it was open
 - **Admin** reads and writes everyone's; **moderator** reads everyone's. Same as todo-service.
 
 The **destination** of a transfer may be any account at all -- paying somebody is the point -- so only the
-source is checked. An account the caller may not see is **404, not 403**, from every endpoint and tool.
+source is checked. An account the caller may not see is **404, not 403**, from every endpoint and tool, and
+funds are judged before the destination, so an unaffordable transfer is 400 whether or not it exists.
+
+The REST API takes **user tokens only**; an agent token there is **403**. An agent's way in is `/mcp` through
+agent-service, where its owner's READ/WRITE setting and activity log apply. The AGENT column below is MCP.
 
 | | ADMIN | MODERATOR | AGENT token | USER |
 |---|---|---|---|---|
@@ -69,7 +73,7 @@ included (with no source), stamped with who asked: `user 3` or `agent 7`.
 | GET | `/api/bank/accounts/{id}` | | one account, with its grants |
 | POST | `/api/bank/accounts/{id}/deposit` | `{"amount"}` | the deposit as a transfer |
 | POST | `/api/bank/accounts/{id}/transfers` | `{"to", "amount"}` | the transfer; `{id}` is the source |
-| GET | `/api/bank/accounts/{id}/transfers` | | its transfers, newest first |
+| GET | `/api/bank/accounts/{id}/transfers` | | its latest 100 transfers, newest first |
 | PUT | `/api/bank/accounts/{id}/permissions/{agentId}` | `{"access": "READ"\|"WRITE"}` | the account; creates or changes the grant |
 | DELETE | `/api/bank/accounts/{id}/permissions/{agentId}` | | the account |
 | POST | `/mcp` | MCP | agent tokens only, compose network only; see below |

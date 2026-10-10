@@ -108,6 +108,9 @@ class AccountServiceTests {
         assertEquals(400, status(() -> bank.transfer(user("6"), a.getId(), b.getId(), -5L)));
         assertEquals(400, status(() -> bank.transfer(user("6"), a.getId(), a.getId(), 5L)));
         assertEquals(404, status(() -> bank.transfer(user("6"), a.getId(), 999_999L, 5L)));
+        assertEquals(400, status(() -> bank.transfer(user("6"), a.getId(), 999_999L, 101L)),
+                "unaffordable is 400 whether or not the destination exists: no free probing for ids");
+        assertEquals(100, bank.get(user("6"), a.getId()).getBalance(), "a refused transfer rolls back its other half");
         assertEquals(400, status(() -> bank.deposit(user("6"), a.getId(), 0L)));
         assertEquals(400, status(() -> bank.create(user("6"), new NewAccount("  ", null))));
 

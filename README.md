@@ -158,8 +158,8 @@ Endpoint by endpoint:
 | todo | `POST /api/todos` | own | own | own | own |
 | todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | own | own |
 | agent | everything under `/api/agents` | own | own | own | own |
-| account | `GET /api/bank/accounts` · `GET .../{id}` · `GET .../{id}/transfers` | everyone's | everyone's | its own + granted | own + its agents' |
-| account | `POST /api/bank/accounts/{id}/transfers` | anyone's | own, else 404 | its own + WRITE grants | own + its agents' |
+| account | `GET /api/bank/accounts` · `GET .../{id}` · `GET .../{id}/transfers` | everyone's | everyone's | 403; over MCP its own + granted | own + its agents' |
+| account | `POST /api/bank/accounts/{id}/transfers` | anyone's | own, else 404 | 403; over MCP its own + WRITE grants | own + its agents' |
 | account | `POST /api/bank/accounts` · `.../deposit` · `PUT`/`DELETE .../permissions/{agentId}` | anyone's | own, else 404 | 403 | own + its agents' |
 
 A todo -- or an agent -- belonging to someone else comes back **404, not 403**, so neither answer says whether
@@ -307,10 +307,10 @@ The consequences worth knowing:
 | agent | POST | `/api/agents/{id}/token` | yes -- owner only; a 30-day token for connecting as this agent |
 | agent | POST | `/mcp?agent={id}` | yes -- MCP; owner's token or the agent's own; proxied |
 | agent | GET | `/api/public/agents/stats` | no |
-| account | GET · POST | `/api/bank/accounts` | yes |
+| account | GET · POST | `/api/bank/accounts` | yes -- user tokens only; an agent token is 403 on all of `/api/bank` |
 | account | GET | `/api/bank/accounts/{id}` · `/api/bank/accounts/{id}/transfers` | yes |
 | account | POST | `/api/bank/accounts/{id}/deposit` | yes -- owner or admin, never an agent token |
-| account | POST | `/api/bank/accounts/{id}/transfers` | yes -- owner, or an agent that owns or was granted WRITE |
+| account | POST | `/api/bank/accounts/{id}/transfers` | yes -- owner or admin; an agent transfers over MCP only |
 | account | PUT · DELETE | `/api/bank/accounts/{id}/permissions/{agentId}` | yes -- owner or admin |
 | account | POST | `/mcp` | yes -- MCP, agent tokens only, compose network only, never proxied |
 | account | GET | `/api/public/bank/stats` | no |
@@ -324,7 +324,7 @@ out of access logs and Referer headers. Rejected input comes back as `{"error": 
 which is what the pages render.
 
 The Node server proxies `/mcp`, `/api/agents*` and `/api/public/agents*` to agent-service, `/api/bank*` and
-`/api/public/bank*` to account-service, `/api/todos*` and `/api/public/todos*` to todo-service and the rest of
+`/api/public/bank*` to account-service (whole path segments, so `/api/banking` is not the bank's), `/api/todos*` and `/api/public/todos*` to todo-service and the rest of
 `/api/*` to auth-service, so the browser stays on
 one origin, no service needs CORS config, and an external agent reaches `/mcp` through the same port.
 

@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -77,7 +78,7 @@ public class AccountMcpServer {
                         }),
                 tool(Tool.builder()
                                 .name("list_transfers")
-                                .description("List an account's transfers, newest first, as '#id from -> to amount (by)'. A deposit has from '-'.")
+                                .description("List an account's latest 100 transfers, newest first, as '#id from -> to amount (by)'. A deposit has from '-'.")
                                 .inputSchema(schema(Map.of("account", Map.of("type", "integer")), List.of("account")))
                                 .annotations(ToolAnnotations.builder().readOnlyHint(true).build())
                                 .build(),
@@ -135,15 +136,14 @@ public class AccountMcpServer {
                 + " -> #" + t.getToAccount() + " " + t.getAmount() + " (" + t.getBy() + ")";
     }
 
-    /** A whole number. 40.9 cents is refused rather than silently becoming 40, and 5.7 is not account 5. */
+    /**
+     * A whole number that fits a long. 40.9 cents is refused rather than silently becoming 40, 5.7 is not account 5,
+     * and 2^64+5 is not account 5 either: exact, or an error.
+     */
     private static Long number(Map<String, Object> args, String key) {
-        Object value = args.get(key);
-        if (value instanceof Number n && n.doubleValue() == Math.rint(n.doubleValue())) {
-            return n.longValue();
-        }
         try {
-            return Long.valueOf(String.valueOf(value));
-        } catch (NumberFormatException e) {
+            return new BigDecimal(String.valueOf(args.get(key))).longValueExact();
+        } catch (NumberFormatException | ArithmeticException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, key + " must be a whole number");
         }
     }

@@ -48,9 +48,11 @@ createServer(async (req, res) => {
   // Agents, their public count and the MCP endpoint an external agent connects to live in agent-service, the
   // money accounts and their public count in account-service, the private todos and the public todo count in
   // todo-service; everything else is auth-service.
-  if (path === '/mcp' || path.startsWith('/api/agents') || path.startsWith('/api/public/agents')) return proxy(req, res, AGENT, path + search);
-  if (path.startsWith('/api/bank') || path.startsWith('/api/public/bank')) return proxy(req, res, ACCOUNT, path + search);
-  if (path.startsWith('/api/todos') || path.startsWith('/api/public/todos')) return proxy(req, res, TODO, path + search);
+  // Whole path segments, so /api/banking is not /api/bank.
+  const under = (prefix) => path === prefix || path.startsWith(prefix + '/');
+  if (path === '/mcp' || under('/api/agents') || under('/api/public/agents')) return proxy(req, res, AGENT, path + search);
+  if (under('/api/bank') || under('/api/public/bank')) return proxy(req, res, ACCOUNT, path + search);
+  if (under('/api/todos') || under('/api/public/todos')) return proxy(req, res, TODO, path + search);
   if (path.startsWith('/api/')) return proxy(req, res, AUTH, path + search);
 
   const [file, type] = ASSETS[path] ?? [PAGES[path], 'text/html'];
