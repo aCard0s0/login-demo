@@ -20,6 +20,7 @@
     <modules>
         <module>libs/auth-client</module>
         <module>libs/web-errors</module>
+        <module>libs/mcp-server</module>
         <module>apps/auth-service</module>
         <module>apps/todo-service</module>
         <module>apps/agent-service</module>

@@ -30,6 +30,12 @@
             <artifactId>auth-client</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- McpEndpoint and Args: the /mcp endpoint and tool-argument parsing the MCP-serving services share. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>mcp-server</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- The MCP server at /mcp, through which an agent reaches the accounts it owns or was granted. Version from the root BOM. -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>

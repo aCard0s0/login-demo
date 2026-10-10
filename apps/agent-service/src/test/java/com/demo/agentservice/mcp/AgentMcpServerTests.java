@@ -273,7 +273,7 @@ class AgentMcpServerTests {
                     text(client.callTool(new CallToolRequest("update_agent", Map.of("id", sibling.getId(), "name", "renamed")))));
             CallToolResult malformed = client.callTool(new CallToolRequest("get_agent", Map.of("id", "seven")));
             assertTrue(Boolean.TRUE.equals(malformed.isError()));
-            assertEquals("id must be a number", text(malformed), "a bad argument is the model's mistake, not a refusal");
+            assertEquals("id must be a whole number", text(malformed), "a bad argument is the model's mistake, not a refusal");
             assertEquals("sibling", agents.get(OWNER, sibling.getId()).getName());
 
             // WRITE: the sibling can be changed, and both logs say so; the agent itself stays out of reach.
@@ -292,7 +292,7 @@ class AgentMcpServerTests {
         List<String> denied = log(agent.getId(), Activity.TOOL_DENIED);
         assertEquals("update_agent: an agent cannot change its own configuration", denied.get(0));
         assertEquals("set_mcp_access: an agent cannot change its own configuration", denied.get(1));
-        assertTrue(denied.stream().noneMatch(d -> d.contains("must be a number")), "malformed arguments are not refusals: " + denied);
+        assertTrue(denied.stream().noneMatch(d -> d.contains("must be a whole number")), "malformed arguments are not refusals: " + denied);
     }
 
     @Test

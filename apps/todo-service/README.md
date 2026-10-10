@@ -81,8 +81,8 @@ sense of. For everybody else it is their own id, which tells them nothing they d
 
 ## The MCP server
 
-The same todos, reachable by an agent at `POST /mcp` (MCP Streamable HTTP, stateless). `TodoMcpServer` wires
-the SDK's servlet transport in and registers four tools, each the thin MCP face of one `TodoService` method,
+The same todos, reachable by an agent at `POST /mcp` (MCP Streamable HTTP, stateless). `TodoMcpServer` hands
+four tools to `McpEndpoint` from [`../../libs/mcp-server`](../../libs/mcp-server/README.md), each the thin MCP face of one `TodoService` method,
 so the owner rules above apply to an agent exactly as they do to the browser:
 
 | tool | `readOnlyHint` | does |

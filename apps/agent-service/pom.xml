@@ -30,6 +30,12 @@
             <artifactId>auth-client</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- McpEndpoint and Args: the /mcp endpoint and tool-argument parsing the MCP-serving services share. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>mcp-server</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- MCP both ways: the server an external agent connects to, and the client that reaches the servers its
              owner attached. Version from the root BOM. -->
         <dependency>

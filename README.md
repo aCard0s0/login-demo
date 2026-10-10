@@ -14,6 +14,7 @@ docker/initdb.sql       one database and one role per service
 .env.example            the admin credentials and OAuth client secrets compose reads from .env
 libs/auth-client        verifying those tokens: the one copy the three services below share
 libs/web-errors         the {error} body every service answers a rejection with
+libs/mcp-server         the stateless /mcp endpoint and tool-argument parsing
 apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
 apps/todo-service       per-account todos, and their MCP server  :9082
 apps/agent-service      agents, their MCP servers, permissions   :9083
@@ -32,6 +33,7 @@ Each service documents itself:
 | web | the pages and the one-origin proxy | [apps/web](apps/web/README.md) |
 | auth-client | `JwtVerifier`, `Revocations` and `Caller`: a plain jar, no service, that todo-, agent- and account-service depend on | [libs/auth-client](libs/auth-client/README.md) |
 | web-errors | `ErrorBodyAdvice`: every rejection, MVC's own included, as `{"error": "..."}`; all four services extend it | [libs/web-errors](libs/web-errors/README.md) |
+| mcp-server | `McpEndpoint` and `Args`: the `/mcp` servlet todo- and account-service serve their tools through, and exact argument parsing agent-service shares too | [libs/mcp-server](libs/mcp-server/README.md) |
 
 ## Package convention
 
