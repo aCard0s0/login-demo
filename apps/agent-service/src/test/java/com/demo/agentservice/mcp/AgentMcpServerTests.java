@@ -325,6 +325,14 @@ class AgentMcpServerTests {
         assertRefused(() -> connect(null, agent.getId()), "invalid or expired token");
         assertRefused(() -> connect("tok-100", null), "which agent? connect to /mcp?agent=<id>");
         assertEquals(2, log(agent.getId(), Activity.CONNECTED).size(), "only the two accepted connections are in the log");
+
+        // A stored header, rather than the caller's token: encrypted at rest, and what the server actually receives.
+        pinned = agent.getId();
+        agents.updateServer(OWNER, agent.getId(), agent.getServers().get(0).getId(),
+                new UpdateMcpServer(null, null, "Bearer stored-s3cret", false, null), "");
+        try (McpSyncClient client = connect("agent-tok", null)) {
+            assertEquals("read_thing saw Bearer stored-s3cret", text(client.callTool(new CallToolRequest("fake__read_thing", Map.of()))));
+        }
     }
 
     /** The gateway passes a result through whole: an image is still an image on the other side, and structured content survives. */

@@ -19,6 +19,7 @@ the `agent` database.
 ```
 agent/     Agent  AgentMcpServer  Access  OthersAccess  AgentRepository  AgentService  AgentController
            NewAgent  UpdateAgent  NewMcpServer  UpdateMcpServer  AgentResponse  McpServerResponse  ServerUrls
+           AuthHeaderCrypto  AuthHeaderMigration
 activity/  Activity  ActivityRepository  ActivityLog  ActivityResponse
 mcp/       AgentMcpServer (the /mcp endpoint and its handler)  McpTools  AgentTools  AccessDenied  ToolResult
 token/     AgentTokens   (JwtVerifier, Revocations and Caller come from the shared apps/token module)
@@ -173,6 +174,14 @@ one fixed endpoint.
 A server's stored `authHeader` is never returned; responses carry `hasAuthHeader` instead, plus `trusted`
 and the `readOnlyTools` list. Rejections come back as `{"error": "..."}` like everywhere else.
 
+The header is **encrypted at rest**, AES-256-GCM, by a JPA converter (`AuthHeaderCrypto`): the entity reads
+and writes plain text and nothing else in the service knows. The key is `agents.auth-header-key`, which
+compose refuses to start without; blank refuses to start here too, rather than quietly storing plain text.
+Each value is `v1:` plus a fresh nonce and the ciphertext, so equal headers never look alike on disk and a
+tampered row fails to decrypt rather than coming back wrong. A row written before encryption existed is read
+as it is and rewritten by `AuthHeaderMigration` at the next startup. Changing the key makes existing headers
+unreadable, so it belongs with the database.
+
 ## Configuration
 
 | Property | Environment | Default |
@@ -182,6 +191,7 @@ and the `readOnlyTools` list. Rejections come back as `{"error": "..."}` like ev
 | `auth.token-versions-uri` | `AUTH_TOKEN_VERSIONS_URI` | `http://localhost:9081/internal/token-versions` |
 | `auth.agent-tokens-uri` | `AUTH_AGENT_TOKENS_URI` | `http://localhost:9081/internal/agent-tokens`; `/{id}/revoke` under it is where a per-agent revoke goes |
 | `auth.internal-secret` | `AUTH_INTERNAL_SECRET` | `dev-internal-secret` -- sent as `X-Internal-Secret` when asking for a token; compose requires `INTERNAL_SECRET` in `.env` |
+| `agents.auth-header-key` | `AGENTS_AUTH_HEADER_KEY` | `dev-auth-header-key` -- encrypts stored authorization headers; blank refuses to start; compose requires `AUTH_HEADER_KEY` in `.env` |
 | `spring.datasource.*` | `SPRING_DATASOURCE_*` | `jdbc:postgresql://localhost:5432/agent`, `agent` / `agent` |
 | `agents.todo-mcp-url` | `AGENTS_TODO_MCP_URL` | `http://localhost:9082/mcp`; blank seeds no server; always trusted |
 | `agents.trusted-server-urls` | `AGENTS_TRUSTED_SERVER_URLS` | `http://localhost:9084/mcp`; comma separated, the deployment's other servers an owner may attach by their private name |
@@ -197,7 +207,8 @@ and the `readOnlyTools` list. Rejections come back as `{"error": "..."}` like ev
   latency ever matters.
 - **A per-agent revoke bites within ten seconds, not at once.** The other services poll the revocation feed
   rather than ask auth-service per request, so a revoked agent token keeps working for up to one poll window.
-- **`authHeader` is stored in plain text**, like the database credentials in this demo.
+- **One encryption key, no rotation.** The `v1:` prefix on each stored header is what a second key version
+  would key on; today a changed key makes every stored header unreadable.
 - **The forwarded token is the owner's full authority.** The built-in todo server checks it like the REST API
   does, so agent-service's READ/WRITE gate is the only thing between a READ agent and `delete_todo`. That is
   the feature; it is also why the gate is checked on every call and never left to the connecting agent.
@@ -215,9 +226,10 @@ as an external agent would, against a real MCP server mounted in the same contex
 URL and once by an untrusted one -- including a permission flipped between two calls, an agent trying to
 widen its own access, an untrusted server whose annotations are ignored in favour of the owner's list, and
 who may connect at all;
-including a server trusted when saved and refused at connect, and an image with structured content coming
-through unchanged; `AgentServiceTests` the ownership rules, the
-activity log and a private URL refused on add and on edit; `ServerUrlsTests` every refused address category,
+including a server trusted when saved and refused at connect, a stored header reaching the server, and an
+image with structured content coming through unchanged; `AgentServiceTests` the ownership rules, the
+activity log, a private URL refused on add and on edit, and a header encrypted on disk, plain once loaded
+and migrated from a legacy row; `AuthHeaderCryptoTests` the round trip, the wrong key and a tampered row; `ServerUrlsTests` every refused address category,
 exact trust, and a name that moves to a private address between save and connect, all against a resolver
 table rather than DNS; `ApiContractTests` the 401, 404 and token shapes. The token check itself is tested
 once, in `apps/token`.

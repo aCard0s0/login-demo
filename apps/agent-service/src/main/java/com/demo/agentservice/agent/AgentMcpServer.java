@@ -1,6 +1,7 @@
 package com.demo.agentservice.agent;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -23,14 +24,13 @@ import java.util.stream.Collectors;
  * because it prefixes every tool name the model sees ({@code todos__list_todos}), which keeps two servers'
  * tools apart.
  *
- * <p>Either a fixed {@code Authorization} header value, or the token of the user who started the run,
- * forwarded as-is ({@code forwardCallerToken}) -- the way the built-in todo server knows whose todos to show.
+ * <p>Either a fixed {@code Authorization} header value -- encrypted at rest by {@link AuthHeaderCrypto}, plain
+ * text to the code -- or the token of the user who started the run, forwarded as-is ({@code forwardCallerToken}),
+ * the way the built-in todo server knows whose todos to show.
  *
  * <p>{@code readOnlyTools} is the owner's own word on which of this server's tools only read. It is what READ
  * keys on for a server the deployment does not trust, since such a server can annotate anything it likes.
  */
-// ponytail: the header value is stored in plain text, like the database credentials in this demo. Encrypt it
-// with a key from the environment before any of this holds a real secret.
 @Entity
 @Table(name = "agent_mcp_servers", uniqueConstraints = @UniqueConstraint(columnNames = {"agent_id", "name"}))
 @Getter
@@ -51,6 +51,7 @@ public class AgentMcpServer {
     @Column(nullable = false)
     private String url;
 
+    @Convert(converter = AuthHeaderCrypto.class)
     @Column(length = 2000)
     private String authHeader;
 

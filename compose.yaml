@@ -106,6 +106,9 @@ services:
       # Where the long-lived token an external agent connects with is minted. Compose-internal, like /internal/token-versions.
       AUTH_AGENT_TOKENS_URI: http://auth-service:9081/internal/agent-tokens
       AUTH_INTERNAL_SECRET: ${INTERNAL_SECRET:?set INTERNAL_SECRET in .env — copy .env.example}
+      # Encrypts the authorization headers owners store on their servers. Required, like the secret: without it the
+      # headers would sit in the database in plain text.
+      AGENTS_AUTH_HEADER_KEY: ${AUTH_HEADER_KEY:?set AUTH_HEADER_KEY in .env — copy .env.example}
       # The built-in MCP server every new agent starts with. Compose-internal: the browser never sees it.
       AGENTS_TODO_MCP_URL: http://todo-service:9082/mcp
       # The other servers an owner may attach by their compose name. Everything else must resolve to a public

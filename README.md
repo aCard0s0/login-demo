@@ -214,7 +214,8 @@ administration.
 
 Seeded into auth-service's database at startup from `ADMIN_EMAIL` and `ADMIN_PASSWORD`, which compose reads
 from `.env`. `.env` is gitignored; `.env.example` is the committed stand-in. Compose refuses to start the
-stack if either value is missing, rather than coming up with nobody in charge.
+stack if either value is missing, rather than coming up with nobody in charge -- and likewise without
+`INTERNAL_SECRET` and `AUTH_HEADER_KEY`, the two secrets agent-service needs.
 
 Seeding is **create-only**: an address that already exists is promoted to `ADMIN`, but its password is left
 exactly as it is, so a restart cannot quietly reset a password the admin has since changed and a stale
@@ -253,7 +254,8 @@ the agent's activity log on the same page.
 Every new agent starts with the built-in **todos** server as READ: todo-service exposes its todos over MCP at
 `/mcp`, with `list_todos` read-only and `add_todo`, `update_todo`, `delete_todo` not. The agent acts **as its
 owner** -- the token it connected with is forwarded to that server -- so it can only ever see the owner's
-todos. Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header.
+todos. Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header, which
+is encrypted at rest with `AUTH_HEADER_KEY` from `.env` (required, like the admin credentials).
 
 An agent reads or changes the owner's other agents only when its **other agents** setting says READ or WRITE,
 through built-in tools scoped to the same owner; it can never change its own setup.
