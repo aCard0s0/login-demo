@@ -123,6 +123,39 @@ class ApiContractTests {
     }
 
     @Test
+    void aNewPasswordComesBackWithAFreshTokenAndKillsTheOldOne() throws Exception {
+        String old = register("Margaret", "margaret@example.com", "hamilton-1936");
+
+        String body = mvc.perform(put("/api/users/me").header("Authorization", "Bearer " + old)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Margaret","email":"margaret@example.com","currentPassword":"hamilton-1936","newPassword":"apollo-1969-x"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isString())
+                .andReturn().getResponse().getContentAsString();
+        String fresh = body.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + old))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + fresh))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(json(null, "margaret@example.com", "hamilton-1936")))
+                .andExpect(status().isUnauthorized());
+        login("margaret@example.com", "apollo-1969-x");
+
+        // A plain edit, no new password, keeps the token it was asked with alive.
+        mvc.perform(put("/api/users/me").header("Authorization", "Bearer " + fresh)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Margaret H","email":"margaret@example.com","currentPassword":"apollo-1969-x"}"""))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/users/me").header("Authorization", "Bearer " + fresh))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Margaret H"));
+    }
+
+    @Test
     void rejectedInputComesBackAs400AndTheErrorShape() throws Exception {
         String token = register("Alonzo", "alonzo@example.com", "church-1903");
 

@@ -68,31 +68,40 @@ public class OAuthFlow {
                 + "&scope=" + encode(provider.getScope())
                 + "&state=" + encode(state)
                 + "&code_challenge=" + challenge(verifier)
-                + "&code_challenge_method=S256";
+                + "&code_challenge_method=S256"
+                + (provider.formPost() ? "&response_mode=form_post" : "");
     }
 
-    /** Everything behind the code: the provider's access token, and the verified identity it names. */
+    /** Everything behind the code: the provider's tokens, and the verified identity they name. */
     public Identity identity(OAuthProvider provider, String code, String verifier) {
-        return provider.identity(http, accessToken(provider, code, verifier));
+        return provider.identity(http, tokens(provider, code, verifier));
     }
 
     /**
-     * Trades the one-time code for an access token. The client secret travels in this back-channel POST and
-     * never through the browser, which is the whole point of the code flow over the old implicit one.
+     * Trades the one-time code for the provider's tokens. The client secret travels in this back-channel POST
+     * and never through the browser, which is the whole point of the code flow over the old implicit one.
      */
-    private String accessToken(OAuthProvider provider, String code, String verifier) {
+    private Map<?, ?> tokens(OAuthProvider provider, String code, String verifier) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
         form.add("code", code);
         form.add("code_verifier", verifier);
         form.add("client_id", provider.getClientId());
-        form.add("client_secret", provider.getClientSecret());
         form.add("redirect_uri", config.redirectUri(provider));
+        // The secret goes in exactly one place: RFC 6749 forbids both, and X refuses a form field.
+        if (!provider.basicClientAuth()) {
+            form.add("client_secret", provider.getClientSecret());
+        }
 
         // GitHub answers form-encoded unless asked for JSON; Google always answers JSON.
         Map<?, ?> body = http.post().uri(provider.getTokenUri())
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .accept(MediaType.APPLICATION_JSON)
+                .headers(headers -> {
+                    if (provider.basicClientAuth()) {
+                        headers.setBasicAuth(provider.getClientId(), provider.getClientSecret());
+                    }
+                })
                 .body(form)
                 .retrieve()
                 .body(Map.class);
@@ -101,7 +110,7 @@ public class OAuthFlow {
         if (token == null || String.valueOf(token).isBlank()) {
             throw new IllegalStateException(provider.getKey() + " did not return an access token");
         }
-        return String.valueOf(token);
+        return body;
     }
 
     /** base64url(sha256(verifier)), the S256 method. Already URL-safe, so it goes into the query as is. */

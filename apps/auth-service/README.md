@@ -114,12 +114,14 @@ then have to be switched off. Only the hash is stored.
   handed to BCrypt (which throws past 72 since Spring Security 7); every check costs one hash either way.
   All of this is `Passwords`, the one place a password is hashed or compared.
 
-## Signing in with Google or GitHub
+## Signing in with a provider
 
+Google, GitHub, Microsoft, Apple, X, LinkedIn and Discord, every one off until a deployment configures it.
 The OAuth 2.0 authorization-code flow, written out by hand against `RestClient` in
 [libs/auth-provider](../../libs/auth-provider/README.md): `OAuthFlow` builds the consent URL and trades the
-code for a verified `Identity`, and each provider is its own jar (`auth-provider-google`, `auth-provider-github`)
-that this service depends on. Not `spring-boot-starter-oauth2-client`, for the same reason the passwords are
+code for a verified `Identity`, and each provider is its own jar (`auth-provider-google`, `auth-provider-github`,
+`auth-provider-microsoft`, `auth-provider-apple`, `auth-provider-x`, `auth-provider-linkedin`,
+`auth-provider-discord`) that this service depends on. Not `spring-boot-starter-oauth2-client`, for the same reason the passwords are
 not `spring-boot-starter-security`: it installs a filter chain this service does not have, and switching it
 back off is more code than the flow. What stays here is `OAuthController`: the two redirects, the state and
 PKCE cookies, and what to do with the identity that comes back -- match it to a user and mint one of our tokens.
@@ -142,7 +144,10 @@ The things worth knowing:
 - **The callback is guarded by a state cookie**, planted on the way out and required to match the `state`
   the provider echoes back. An attacker can make a browser visit the callback but cannot set a cookie on
   this origin, so the two halves cannot be made to agree. `SameSite=Lax`, not `Strict`: the callback is a
-  cross-site top-level navigation, and `Strict` would withhold the cookie exactly when it is needed.
+  cross-site top-level navigation, and `Strict` would withhold the cookie exactly when it is needed. Apple
+  sends the browser back with a POST rather than a GET, which `Lax` would also withhold the cookie from, so
+  for Apple the cookies are `SameSite=None; Secure` and the callback takes a POST -- and so Apple only works
+  over HTTPS, which Apple requires of the redirect URI anyway.
 - **The callback also carries PKCE.** A verifier is planted in a second cookie next to the state, the
   provider is shown its SHA-256 on the way out, and the verifier itself travels only in the back-channel token
   request. A code lifted from the redirect is worthless without the cookie that started it.
@@ -158,9 +163,9 @@ The things worth knowing:
 - **A disabled provider answers 404**, the same as an unknown one. Which providers a deployment configured
   is nobody else's business.
 
-Both providers are off unless a deployment sets `ENABLED` *and* both credentials -- half-filled credentials
-count as off, so a copied-and-unfinished `.env` draws no button that leads to a provider error page.
-`GET /api/oauth/providers` is what the login page reads to know which buttons to draw.
+Every provider is off unless a deployment sets `ENABLED` *and* every credential it needs -- half-filled
+credentials count as off, so a copied-and-unfinished `.env` draws no button that leads to a provider error
+page. `GET /api/oauth/providers` is what the login page reads to know which buttons to draw.
 
 Each provider needs `<oauth.redirect-base-url>/api/oauth/<provider>/callback` registered as its callback
 URL, exactly as written, host and port included. Serving the frontend from somewhere else means changing
@@ -168,11 +173,11 @@ the property and the registered URI together.
 
 ### Getting a client id and secret
 
-Both providers hand out a **client id** (public, and visible to anyone who clicks a button) and a **client
+Every provider hands out a **client id** (public, and visible to anyone who clicks a button) and a **client
 secret** (private, and only ever sent from this service to the provider's token endpoint, never through the
-browser). The id stays readable on the app's page forever; the **secret is shown once**, at creation, so
-copy it straight into `.env`. Neither provider will show it again, and the fix for a lost one is to
-generate a replacement.
+browser) -- except Apple, which hands out a private key instead, see below. The id stays readable on the
+app's page forever; the **secret is shown once**, at creation, so copy it straight into `.env`. No provider
+will show it again, and the fix for a lost one is to generate a replacement.
 
 The URLs below assume the default `http://localhost:3000`. On any other address, substitute it in the
 callback URL *and* in `OAUTH_REDIRECT_BASE_URL`, together: a provider rejects a `redirect_uri` it was not
@@ -223,6 +228,72 @@ GitHub takes up to 10 callback URLs on one app, so one app can cover localhost a
 rather than needing two. There is no test-user list and no review for this scope: the app works for anyone
 as soon as it is registered.
 
+#### Microsoft
+
+1. [entra.microsoft.com](https://entra.microsoft.com) -> **App registrations** -> **New registration**.
+   Supported account types: **Accounts in any organizational directory and personal Microsoft accounts**,
+   which is what the `common` endpoint this service uses serves. Redirect URI, platform **Web**:
+   `http://localhost:3000/api/oauth/microsoft/callback` (Microsoft allows `http` for `localhost` only).
+2. **Certificates & secrets** -> **New client secret**. Copy the **Value**, not the Secret ID.
+3. **Token configuration** -> **Add optional claim** -> token type **ID** -> tick **email**, and accept
+   turning on the Graph `email` permission. Then **Manifest** -> in `optionalClaims.idToken` add
+   `{"name": "xms_edov", "source": null, "essential": false, "additionalProperties": []}`. The portal may
+   warn the claim is unrecognised; it is not. Without it, this service refuses every Microsoft sign-in as
+   unverified, because the plain `email` claim is whatever a tenant admin typed.
+4. The client id is the **Application (client) ID** on the overview page.
+
+#### Apple
+
+Apple is the odd one out: no `localhost`, no `http`, and no secret to copy.
+
+1. [developer.apple.com/account](https://developer.apple.com/account) -> **Identifiers** -> **+** -> **App IDs**,
+   with the **Sign in with Apple** capability. This is the parent; it is not the client id.
+2. **Identifiers** -> **+** -> **Services IDs**. The identifier you choose (`com.example.login`) is the
+   **client id**. Enable **Sign in with Apple** -> **Configure**: the App ID above as primary, your domain
+   under **Domains**, and `https://<your-domain>/api/oauth/apple/callback` under **Return URLs**. Apple
+   refuses `http` and `localhost`, so this provider only works on a deployed, HTTPS address.
+3. **Keys** -> **+** -> tick **Sign in with Apple** -> **Configure** -> the App ID above. Download the `.p8`
+   file: Apple shows it **once**. The **Key ID** is on the key's page; the **Team ID** is top right of the
+   account page.
+4. Put the `.p8` contents in `OAUTH_APPLE_PRIVATE_KEY` on one line, with `\n` for the line breaks (the
+   BEGIN/END lines may stay or go). `OAUTH_APPLE_CLIENT_ID` is the Services ID, plus `OAUTH_APPLE_TEAM_ID`
+   and `OAUTH_APPLE_KEY_ID`. A key that does not parse counts as off.
+
+Apple hands the name over once, on the very first consent, in a form field this service does not read; an
+Apple user is named after their address's local part until they rename themselves on `/profile`. "Hide my
+email" users arrive as `@privaterelay.appleid.com` addresses, which are verified and work like any other.
+
+#### X
+
+1. [developer.x.com/en/portal/dashboard](https://developer.x.com/en/portal/dashboard) -> your project ->
+   your app -> **Settings** -> **User authentication settings** -> **Set up**.
+2. **App permissions**: Read. Tick **Request email from users** -- without it the API never returns the
+   address and every sign-in is refused. **Type of App**: Web App. **Callback URI**:
+   `http://localhost:3000/api/oauth/x/callback`; **Website URL**: anything.
+3. **Keys and tokens** -> **OAuth 2.0 Client ID and Client Secret** -> **Generate**. Both are shown once.
+
+X requires PKCE, which every provider here gets anyway, and reads the client secret only as HTTP Basic on
+the token request, which `XProvider` says with `basicClientAuth()`. The email comes from
+`/2/users/me?user.fields=confirmed_email` under the `users.email` scope; an account created with a phone
+number and no email answers `{}` and is refused.
+
+#### LinkedIn
+
+1. [linkedin.com/developers/apps](https://www.linkedin.com/developers/apps) -> **Create app**. It must be
+   attached to a LinkedIn Page you administer.
+2. **Products** -> **Sign In with LinkedIn using OpenID Connect** -> **Request access** (instant). This is
+   what grants the `openid profile email` scopes; the old `r_emailaddress` product is gone.
+3. **Auth** -> **Authorized redirect URLs for your app** -> `http://localhost:3000/api/oauth/linkedin/callback`.
+   The client id and **Primary Client Secret** are on the same tab.
+
+#### Discord
+
+1. [discord.com/developers/applications](https://discord.com/developers/applications) -> **New Application**.
+2. **OAuth2** -> **Redirects** -> `http://localhost:3000/api/oauth/discord/callback`. The **Client ID** is
+   on the same page; **Reset Secret** shows the secret once.
+
+Discord says in `verified` whether it has confirmed the address; an unconfirmed Discord account is refused.
+
 #### Putting them in
 
 ```bash
@@ -233,6 +304,13 @@ OAUTH_GOOGLE_CLIENT_SECRET=...
 OAUTH_GITHUB_ENABLED=true
 OAUTH_GITHUB_CLIENT_ID=...
 OAUTH_GITHUB_CLIENT_SECRET=...
+
+# And likewise OAUTH_MICROSOFT_*, OAUTH_X_*, OAUTH_LINKEDIN_*, OAUTH_DISCORD_*; Apple takes
+OAUTH_APPLE_ENABLED=true
+OAUTH_APPLE_CLIENT_ID=com.example.login
+OAUTH_APPLE_TEAM_ID=ABCDE12345
+OAUTH_APPLE_KEY_ID=FGHIJ67890
+OAUTH_APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY-----
 ```
 
 Then `./login-demo start auth-service` -- compose re-reads `.env`, and `GET /api/oauth/providers` is the
@@ -287,7 +365,7 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 | POST | `/internal/agent-tokens/{agentId}/revoke` | -> `{version}`: bumps that agent's version, killing every token minted for it; same secret, else 403 |
 | GET | `/api/oauth/providers` | `[{key, label}]` -- the configured providers, no token |
 | GET | `/api/oauth/{provider}/start` | 302 to consent, or 404 if that provider is off -- no token |
-| GET | `/api/oauth/{provider}/callback` | 302 to `/login#token=...&name=...&role=...` or `/login#error=...` -- no token |
+| GET, POST | `/api/oauth/{provider}/callback` | 302 to `/login#token=...&name=...&role=...` or `/login#error=...` -- no token; POST is what Apple sends |
 | GET | `/api/public/stats` | `{users}` -- no token |
 | GET | `/api/jwks.json` | the public signing key -- no token |
 
@@ -310,6 +388,9 @@ unknown path -- which `AuthExceptionAdvice` is responsible for.
 | `oauth.google.client-id` / `.client-secret` | `OAUTH_GOOGLE_CLIENT_*` | empty -- and empty means off |
 | `oauth.github.enabled` | `OAUTH_GITHUB_ENABLED` | `false` |
 | `oauth.github.client-id` / `.client-secret` | `OAUTH_GITHUB_CLIENT_*` | empty -- and empty means off |
+| `oauth.microsoft.*`, `oauth.x.*`, `oauth.linkedin.*`, `oauth.discord.*` | `OAUTH_<PROVIDER>_ENABLED`, `_CLIENT_ID`, `_CLIENT_SECRET` | `false`, empty, empty |
+| `oauth.apple.enabled` | `OAUTH_APPLE_ENABLED` | `false` |
+| `oauth.apple.client-id` / `.team-id` / `.key-id` / `.private-key` | `OAUTH_APPLE_CLIENT_ID`, `_TEAM_ID`, `_KEY_ID`, `_PRIVATE_KEY` | empty -- all four needed, and the key must parse |
 | `spring.datasource.url` | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/auth` |
 | `spring.datasource.username` / `.password` | `SPRING_DATASOURCE_*` | `auth` / `auth` |
 
@@ -321,9 +402,22 @@ docker compose up -d db                  # it still needs a database
 ./mvnw -pl apps/auth-service test        # SQLite backed: needs nothing running
 ```
 
-Tests: `UserServiceTests` and `SessionServiceTests` for the rules, `ApiContractTests` for the HTTP
-contract the frontend and todo-service are written against -- status codes, the `{error}` shape, the
-`Authorization` header, and the seeded admin. `OAuthTests` covers the half of the provider flow that needs
-no provider: which buttons a deployment offers, where the browser is sent, and what a callback that did not
-start here gets. The code-for-token exchange is not covered, because faking it would test the fake. Each
-uses its own SQLite file so re-creating the schema in one cannot disturb another.
+Tests, each on its own SQLite file so re-creating the schema in one cannot disturb another:
+
+- `UserServiceTests`, `SessionServiceTests`, `AttemptWindowTests`, `AuthExceptionAdviceTests`, `AdminSeederTests`
+  for the rules.
+- `ApiContractTests` for the HTTP contract the frontend and todo-service are written against -- status codes,
+  the `{error}` shape, the `Authorization` header, the seeded admin, agent tokens, and a password change
+  handing back a fresh token. `RegistrationCapTests` for the service-wide 429, in a context of its own since
+  filling the window would lock every other test out.
+- `EndpointAuthSweepTests` is the fail-closed guard: a controller authenticates by declaring a `User`
+  parameter, so a new endpoint that forgets it would be public and nothing at runtime would say so. The
+  sweep walks every mapping and requires each to be on its list of deliberately public endpoints, guarded by
+  the internal secret, or answering 401 without a token -- over HTTP, not by the look of its signature.
+- `OAuthTests` for the half of the provider flow that needs no provider: which buttons a deployment offers,
+  where the browser is sent, and what a callback that did not start here gets. `OAuthCallbackIntegrationTests`
+  for the other half, against a throwaway HTTP server standing in for the provider: the code exchanged with
+  the verifier the browser kept, the user found or made, a suspended one refused, the provider's error text
+  kept out of the browser, the cookies spent, and the form-POST callback Apple sends.
+- `RevocationIntegrationTests` for revocation as todo-, agent- and wallet-service see it, through
+  `libs/auth-client` over a real port.

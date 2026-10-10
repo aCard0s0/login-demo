@@ -24,7 +24,8 @@
             <artifactId>web-errors</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- Sign-in with a provider: the flow lives in libs/auth-provider; this service offers these two. -->
+        <!-- Sign-in with a provider: the flow lives in libs/auth-provider; this service offers these seven,
+             each off until a deployment configures it. -->
         <dependency>
             <groupId>com.demo</groupId>
             <artifactId>auth-provider-google</artifactId>
@@ -33,6 +34,31 @@
         <dependency>
             <groupId>com.demo</groupId>
             <artifactId>auth-provider-github</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-microsoft</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-apple</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-x</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-linkedin</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-discord</artifactId>
             <version>${project.version}</version>
         </dependency>
         <!-- BCrypt only. The full security starter would install a filter chain we would then have to switch off. -->

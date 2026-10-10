@@ -15,7 +15,7 @@ docker/initdb.sql       one database and one role per service
 libs/auth-client        verifying those tokens: the one copy the three services below share
 libs/web-errors         the {error} body every service answers a rejection with
 libs/mcp-server         the stateless /mcp endpoint and tool-argument parsing
-libs/auth-provider      sign-in with a provider: the flow in core/, one jar each for google/ and github/
+libs/auth-provider      sign-in with a provider: the flow in core/, one jar per provider (google, github, microsoft, apple, x, linkedin, discord)
 apps/auth-service       users, login, OAuth, roles, tokens       :9081
 apps/todo-service       per-user todos, and their MCP server     :9082
 apps/agent-service      agents, their MCP servers, permissions   :9083
@@ -35,7 +35,7 @@ Each service documents itself:
 | auth-client | `JwtVerifier`, `Revocations` and `Caller`: a plain jar, no service, that todo-, agent- and wallet-service depend on | [libs/auth-client](libs/auth-client/README.md) |
 | web-errors | `ErrorBodyAdvice`: every rejection, MVC's own included, as `{"error": "..."}`; all four services extend it | [libs/web-errors](libs/web-errors/README.md) |
 | mcp-server | `McpEndpoint` and `Args`: the `/mcp` servlet todo- and wallet-service serve their tools through, and exact argument parsing agent-service shares too | [libs/mcp-server](libs/mcp-server/README.md) |
-| auth-provider | `OAuthFlow` and `OAuthProvider` in `core`, `GoogleProvider` and `GitHubProvider` in their own jars: the authorization-code flow with PKCE, which auth-service's `OAuthController` drives | [libs/auth-provider](libs/auth-provider/README.md) |
+| auth-provider | `OAuthFlow` and `OAuthProvider` in `core`, one jar per provider (Google, GitHub, Microsoft, Apple, X, LinkedIn, Discord): the authorization-code flow with PKCE, which auth-service's `OAuthController` drives | [libs/auth-provider](libs/auth-provider/README.md) |
 
 ## Glossary
 
@@ -292,13 +292,15 @@ pointed at the database or auth-service's `/internal` endpoints from inside its 
 not followed. Details, the activity kinds and the deliberate limitations are in the
 [agent-service README](apps/agent-service/README.md).
 
-## Signing in with Google or GitHub
+## Signing in with a provider
 
-Off by default, and on per provider: set `OAUTH_<PROVIDER>_ENABLED=true` together with that provider's
-client id and secret in `.env`. Either credential missing counts as off, so a half-filled `.env` draws no
-button rather than a button that leads to a provider error page. `.env.example` lists the settings, and
+Google, GitHub, Microsoft, Apple, X, LinkedIn or Discord. Off by default, and on per provider: set
+`OAUTH_<PROVIDER>_ENABLED=true` together with that provider's client id and secret in `.env` (Apple takes a
+team id, a key id and a `.p8` key instead of a secret, and works over HTTPS only). Any credential missing
+counts as off, so a half-filled `.env` draws no button rather than a button that leads to a provider error
+page. `.env.example` lists the settings, and
 [getting a client id and secret](apps/auth-service/README.md#getting-a-client-id-and-secret) walks through
-both consoles.
+every console.
 
 Register `http://localhost:3000/api/oauth/<provider>/callback` as the callback URL with the provider,
 exactly as written. Serving the frontend from another address means changing `OAUTH_REDIRECT_BASE_URL` and
@@ -313,7 +315,7 @@ The flow is the OAuth 2.0 authorization-code flow written out by hand rather tha
 `spring-boot-starter-oauth2-client`, which would install the security filter chain these services
 deliberately do not have. The state-cookie guard, the fragment handoff, and why a user created this way
 has no usable password are in the
-[auth-service README](apps/auth-service/README.md#signing-in-with-google-or-github).
+[auth-service README](apps/auth-service/README.md#signing-in-with-a-provider).
 
 ## How the services trust each other
 

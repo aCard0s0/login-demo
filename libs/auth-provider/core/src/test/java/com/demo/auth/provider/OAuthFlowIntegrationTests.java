@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class OAuthFlowIntegrationTests {
 
     /** A provider whose endpoints are the throwaway server, and whose identity is one API call. */
-    static final class Local extends OAuthProvider {
+    static class Local extends OAuthProvider {
         private final String api;
 
         Local(String base) {
@@ -45,6 +45,31 @@ class OAuthFlowIntegrationTests {
         public Identity identity(RestClient http, String accessToken) {
             Map<?, ?> me = get(http, api, accessToken, Map.class);
             return new Identity(string(me, "email"), string(me, "name"));
+        }
+    }
+
+    /** What X looks like: the secret only as HTTP Basic. */
+    static final class Basic extends Local {
+        Basic(String base) {
+            super(base);
+        }
+
+        @Override
+        public boolean basicClientAuth() {
+            return true;
+        }
+    }
+
+    /** What Apple and Microsoft look like: the identity in the id_token, no API call at all. */
+    static final class IdToken extends Local {
+        IdToken(String base) {
+            super(base);
+        }
+
+        @Override
+        public Identity identity(RestClient http, Map<?, ?> tokenResponse) {
+            Map<String, Object> claims = idTokenClaims(tokenResponse);
+            return new Identity(string(claims, "email"), string(claims, "name"));
         }
     }
 
@@ -67,6 +92,10 @@ class OAuthFlowIntegrationTests {
             seen.put("token.form", new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             seen.put("token.contentType", exchange.getRequestHeaders().getFirst("Content-Type"));
             seen.put("token.accept", exchange.getRequestHeaders().getFirst("Accept"));
+            String authorization = exchange.getRequestHeaders().getFirst("Authorization");
+            if (authorization != null) {
+                seen.put("token.authorization", authorization);
+            }
             answer(exchange, tokenStatus, tokenAnswer);
         });
         server.createContext("/me", exchange -> {
@@ -119,6 +148,51 @@ class OAuthFlowIntegrationTests {
         tokenAnswer = "{\"error\":\"invalid_grant\"}";
         assertThrows(RestClientException.class, () -> flow.identity(provider, "code-1", "verifier-1"));
         assertNull(seen.get("me.authorization"), "no token, so the API is never called");
+    }
+
+    @Test
+    void aBasicAuthProviderGetsTheSecretInTheHeaderAndNowhereElse() {
+        Basic basic = new Basic("http://localhost:" + server.getAddress().getPort());
+        assertEquals(new Identity("ada@example.com", "Ada"), flow.identity(basic, "code-1", "verifier-1"));
+
+        String expected = "Basic " + java.util.Base64.getEncoder().encodeToString("client-1:secret-1".getBytes(StandardCharsets.UTF_8));
+        assertEquals(expected, seen.get("token.authorization"));
+        Map<String, String> form = form(seen.get("token.form"));
+        assertNull(form.get("client_secret"), "RFC 6749: one client authentication method per request, and X refuses the form one");
+        assertEquals("client-1", form.get("client_id"), "the id still travels in the form, as X's example shows");
+        assertEquals("verifier-1", form.get("code_verifier"));
+    }
+
+    @Test
+    void anIdTokenProviderReadsTheClaimsAndChecksTheyWereMintedForThisClient() throws Exception {
+        IdToken provider = new IdToken("http://localhost:" + server.getAddress().getPort());
+        com.nimbusds.jose.jwk.RSAKey key = new com.nimbusds.jose.jwk.gen.RSAKeyGenerator(2048).generate();
+
+        tokenAnswer = "{\"access_token\":\"at-1\",\"id_token\":\"" + idToken(key, "client-1", 60) + "\"}";
+        assertEquals(new Identity("ada@example.com", "Ada"), flow.identity(provider, "code-1", "verifier-1"));
+        assertNull(seen.get("me.authorization"), "the identity is in the token, so no API is asked");
+
+        tokenAnswer = "{\"access_token\":\"at-1\",\"id_token\":\"" + idToken(key, "someone-else", 60) + "\"}";
+        assertThrows(IllegalStateException.class, () -> flow.identity(provider, "code-1", "verifier-1"),
+                "a token minted for another app must not open a user here");
+        tokenAnswer = "{\"access_token\":\"at-1\",\"id_token\":\"" + idToken(key, "client-1", -60) + "\"}";
+        assertThrows(IllegalStateException.class, () -> flow.identity(provider, "code-1", "verifier-1"), "nor an expired one");
+        tokenAnswer = "{\"access_token\":\"at-1\"}";
+        assertThrows(IllegalStateException.class, () -> flow.identity(provider, "code-1", "verifier-1"), "nor none at all");
+        tokenAnswer = "{\"access_token\":\"at-1\",\"id_token\":\"not.a.jwt\"}";
+        assertThrows(IllegalStateException.class, () -> flow.identity(provider, "code-1", "verifier-1"));
+    }
+
+    /** An id_token as a provider would mint it, signed with a throwaway key: the flow trusts TLS, not the signature. */
+    static String idToken(com.nimbusds.jose.jwk.RSAKey key, String audience, long secondsToLive) throws Exception {
+        com.nimbusds.jwt.SignedJWT jwt = new com.nimbusds.jwt.SignedJWT(
+                new com.nimbusds.jose.JWSHeader(com.nimbusds.jose.JWSAlgorithm.RS256),
+                new com.nimbusds.jwt.JWTClaimsSet.Builder()
+                        .issuer("https://issuer.example.com").audience(audience).subject("sub-1")
+                        .expirationTime(new java.util.Date(System.currentTimeMillis() + secondsToLive * 1000))
+                        .claim("email", "ada@example.com").claim("name", "Ada").build());
+        jwt.sign(new com.nimbusds.jose.crypto.RSASSASigner(key));
+        return jwt.serialize();
     }
 
     private static void answer(HttpExchange exchange, int status, String json) throws IOException {

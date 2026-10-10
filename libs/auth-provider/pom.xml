@@ -21,5 +21,10 @@
         <module>core</module>
         <module>google</module>
         <module>github</module>
+        <module>microsoft</module>
+        <module>apple</module>
+        <module>x</module>
+        <module>linkedin</module>
+        <module>discord</module>
     </modules>
 </project>

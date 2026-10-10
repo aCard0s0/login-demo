@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -48,7 +49,9 @@ public class OAuthController {
      * or read a cookie on this origin, so they cannot make the two halves match.
      *
      * <p>SameSite=Lax rather than Strict on purpose -- the callback is a cross-site top-level navigation
-     * from the provider, and Strict would withhold the cookie exactly when it is needed.
+     * from the provider, and Strict would withhold the cookie exactly when it is needed. A provider that
+     * sends the browser back with a POST (Apple) gets SameSite=None instead, since Lax withholds a cookie
+     * from a cross-site POST too; None needs Secure, which is why such a provider only works over HTTPS.
      */
     private static final String STATE_COOKIE = "oauth_state";
 
@@ -98,8 +101,8 @@ public class OAuthController {
         String verifier = secret();
         return ResponseEntity.status(HttpStatus.FOUND)
                 .header(HttpHeaders.LOCATION, oauth.consentUri(target, state, verifier))
-                .header(HttpHeaders.SET_COOKIE, cookie(STATE_COOKIE, state, STATE_TTL).toString())
-                .header(HttpHeaders.SET_COOKIE, cookie(VERIFIER_COOKIE, verifier, STATE_TTL).toString())
+                .header(HttpHeaders.SET_COOKIE, cookie(target, STATE_COOKIE, state, STATE_TTL).toString())
+                .header(HttpHeaders.SET_COOKIE, cookie(target, VERIFIER_COOKIE, verifier, STATE_TTL).toString())
                 .build();
     }
 
@@ -107,8 +110,11 @@ public class OAuthController {
      * Step two: the provider sends the browser back here. Everything that can go wrong ends the same way --
      * back at the login page with a message in the fragment -- because there is nobody to read a JSON error
      * at this point in the flow, only a browser mid-redirect.
+     *
+     * <p>GET for the providers that answer with a query string; POST for the one that answers with a form
+     * ({@code response_mode=form_post}). The parameters bind the same way either way.
      */
-    @GetMapping("/{provider}/callback")
+    @RequestMapping(value = "/{provider}/callback", method = {RequestMethod.GET, RequestMethod.POST})
     public ResponseEntity<Void> callback(@PathVariable String provider,
                                          @RequestParam(required = false) String code,
                                          @RequestParam(required = false) String state,
@@ -118,8 +124,8 @@ public class OAuthController {
         OAuthProvider target = enabled(provider);
         // Whatever happens next, this attempt's state and verifier are spent.
         ResponseEntity.BodyBuilder done = ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.SET_COOKIE, cookie(STATE_COOKIE, "", Duration.ZERO).toString())
-                .header(HttpHeaders.SET_COOKIE, cookie(VERIFIER_COOKIE, "", Duration.ZERO).toString());
+                .header(HttpHeaders.SET_COOKIE, cookie(target, STATE_COOKIE, "", Duration.ZERO).toString())
+                .header(HttpHeaders.SET_COOKIE, cookie(target, VERIFIER_COOKIE, "", Duration.ZERO).toString());
 
         if (error != null && !error.isBlank()) {
             return done.header(HttpHeaders.LOCATION, landing("error", "sign-in with " + target.getLabel() + " was cancelled")).build();
@@ -167,11 +173,11 @@ public class OAuthController {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    private ResponseCookie cookie(String name, String value, Duration maxAge) {
+    private ResponseCookie cookie(OAuthProvider provider, String name, String value, Duration maxAge) {
         return ResponseCookie.from(name, value)
                 .httpOnly(true)
                 .secure(config.getRedirectBaseUrl().startsWith("https://"))
-                .sameSite("Lax")
+                .sameSite(provider.formPost() ? "None" : "Lax")
                 .path("/api/oauth")
                 .maxAge(maxAge)
                 .build();

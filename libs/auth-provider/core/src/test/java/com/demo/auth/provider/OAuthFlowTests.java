@@ -6,12 +6,13 @@ import org.springframework.web.client.RestClient;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The half that needs no provider: PKCE against the RFC's own vector, and which providers count as offered. */
 class OAuthFlowTests {
 
-    static final class Fake extends OAuthProvider {
+    static class Fake extends OAuthProvider {
         Fake(String key) {
             super(key, key, "https://" + key + "/auth", "https://" + key + "/token", "email");
         }
@@ -19,6 +20,18 @@ class OAuthFlowTests {
         @Override
         public Identity identity(RestClient http, String accessToken) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    /** What Apple looks like: the browser comes back with a POST. */
+    static final class FormPost extends Fake {
+        FormPost() {
+            super("post");
+        }
+
+        @Override
+        public boolean formPost() {
+            return true;
         }
     }
 
@@ -51,6 +64,14 @@ class OAuthFlowTests {
         assertTrue(consent.startsWith("https://on/auth?response_type=code&client_id=id&"), consent);
         assertTrue(consent.contains("redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fapi%2Foauth%2Fon%2Fcallback"), consent);
         assertTrue(consent.endsWith("&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"), consent);
+        assertFalse(consent.contains("response_mode"), "a query-string provider is not told about form_post: " + consent);
+    }
+
+    @Test
+    void aFormPostProviderIsAskedForOneAndTheCallbackParametersSpellTheSame() {
+        OAuthFlow flow = new OAuthFlow(new OAuthProperties(), List.of());
+        String consent = flow.consentUri(new FormPost(), "s", "v".repeat(43));
+        assertTrue(consent.endsWith("&code_challenge_method=S256&response_mode=form_post"), consent);
     }
 
     @Test
