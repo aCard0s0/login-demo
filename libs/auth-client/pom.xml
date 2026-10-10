@@ -12,7 +12,7 @@
 
     <artifactId>auth-client</artifactId>
     <name>auth-client</name>
-    <description>Verifying auth-service's tokens in process: the one copy todo-, agent- and account-service share</description>
+    <description>Verifying auth-service's tokens in process: the one copy todo-, agent- and wallet-service share</description>
 
     <dependencies>
         <!-- The same starter the services use: RestClient plus Jackson for the revocation feed, and

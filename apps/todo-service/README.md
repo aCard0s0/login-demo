@@ -21,7 +21,7 @@ support/  TodoExceptionAdvice
 ```
 
 Plus `com.demo.auth.client` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`../../libs/auth-client`](../../libs/auth-client/README.md)
-module, which agent-service and account-service use too. `todo` depends on it for who the caller is; `mcp`
+module, which agent-service and wallet-service use too. `todo` depends on it for who the caller is; `mcp`
 depends on both and nothing points back. `stats` is the unauthenticated corner,
 kept apart so the trust boundary shows up in the tree.
 

@@ -262,8 +262,8 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 | PUT | `/api/users/{id}/role` | `{role}` -- admin only, else 403 |
 | PUT | `/api/users/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |
 | POST | `/api/users/{id}/revoke` | no body -- admin only; kills every token the user holds |
-| GET | `/internal/token-versions` | `{"<userId>": version, "agent:<agentId>": version}` for every revoked user and agent; todo-, agent- and account-service poll it |
-| POST | `/internal/agent-tokens` | `{accountId, agentId}` -> `{token}`: a 30-day `AGENT` token for one agent, stamped with its `agentVer`; agent-service asks, with `X-Internal-Secret`, else 403 |
+| GET | `/internal/token-versions` | `{"<userId>": version, "agent:<agentId>": version}` for every revoked user and agent; todo-, agent- and wallet-service poll it |
+| POST | `/internal/agent-tokens` | `{userId, agentId}` -> `{token}`: a 30-day `AGENT` token for one agent, stamped with its `agentVer`; agent-service asks, with `X-Internal-Secret`, else 403 |
 | POST | `/internal/agent-tokens/{agentId}/revoke` | -> `{version}`: bumps that agent's version, killing every token minted for it; same secret, else 403 |
 | GET | `/api/oauth/providers` | `[{key, label}]` -- the configured providers, no token |
 | GET | `/api/oauth/{provider}/start` | 302 to consent, or 404 if that provider is off -- no token |

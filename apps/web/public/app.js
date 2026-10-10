@@ -63,7 +63,7 @@ const ICONS = {
   login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   agents: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
-  bank: '<rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
+  wallet: '<rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
   run: '<polygon points="6 3 20 12 6 21 6 3"/>',
   remove: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
   add: '<path d="M5 12h14"/><path d="M12 5v14"/>',
@@ -114,7 +114,7 @@ export const renderNav = () => {
     const side = document.createElement('nav');
     side.className = 'side';
     side.setAttribute('aria-label', 'Pages');
-    side.append(link('/todos', 'Todos', 'todos'), link('/bank', 'Bank', 'bank'));
+    side.append(link('/todos', 'Todos', 'todos'), link('/wallets', 'Wallets', 'wallet'));
     if (claims().role === 'ADMIN') side.append(link('/admin', 'Admin', 'admin'));
     header.after(side);
     document.body.classList.add('with-side');

@@ -12,7 +12,7 @@
 
     <artifactId>mcp-server</artifactId>
     <name>mcp-server</name>
-    <description>A service's stateless /mcp endpoint and the tool arguments it reads: the one copy todo-, account- and agent-service share</description>
+    <description>A service's stateless /mcp endpoint and the tool arguments it reads: the one copy todo-, wallet- and agent-service share</description>
 
     <dependencies>
         <dependency>

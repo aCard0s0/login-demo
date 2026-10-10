@@ -16,11 +16,11 @@ minified, so what is in `public/` is what the browser gets.
 | `/profile` | Change your name, email or password. |
 | `/agents` | Your agents: create one, delete one, see each one's servers and access at a glance. |
 | `/agent?id=` | One agent: its instructions, its MCP servers and their READ/WRITE, access to your other agents, how to connect to it, and its activity. |
-| `/bank` | Your money accounts: open one for yourself or an agent, deposit, transfer, grant an agent READ or WRITE, see an account's history. |
+| `/wallets` | Your wallets: open one for yourself or an agent, deposit, transfer, grant an agent READ or WRITE, see a wallet's history. |
 | `/admin` | Admin only: users, suspend and revoke. |
 
 ```
-public/index.html  login.html  todos.html  profile.html  agents.html  agent.html  bank.html  admin.html
+public/index.html  login.html  todos.html  profile.html  agents.html  agent.html  wallets.html  admin.html
        app.js      token handling, the api() helper, the shared header and sidebar
        style.css
 server.js          the fixed URL map and the /api proxy
@@ -49,8 +49,8 @@ password does.
 
 ## The proxy
 
-`/mcp`, `/api/agents*` and `/api/public/agents*` go to agent-service, `/api/bank*` and `/api/public/bank*` to
-account-service, `/api/todos*` and `/api/public/todos*` to todo-service, and the rest of `/api/*` to
+`/mcp`, `/api/agents*` and `/api/public/agents*` go to agent-service, `/api/wallets*` and `/api/public/wallets*` to
+wallet-service, `/api/todos*` and `/api/public/todos*` to todo-service, and the rest of `/api/*` to
 auth-service. Method,
 path, headers and body are passed through untouched, so PATCH, the `Authorization` header, the OAuth state
 cookie and the 302s of the provider flow all need nothing special.
@@ -70,11 +70,11 @@ stored anywhere in the browser. **Revoke tokens** next to it kills every token m
 a confirm; the owner's login and other agents are untouched. A stored authorization header shows only as *header set*; the value is never
 sent back.
 
-## The bank in the UI
+## Wallets in the UI
 
-`/bank` talks to account-service for everything and to agent-service once, for the names of your agents, so
+`/wallets` talks to wallet-service for everything and to agent-service once, for the names of your agents, so
 the *For* column and the grant form can say *todo helper* instead of *agent #7*. Amounts are typed in units
-and sent as whole cents; the server never sees a fraction. **History** toggles one account's transfers under
+and sent as whole cents; the server never sees a fraction. **History** toggles one wallet's transfers under
 the forms. Agents never see this page: an agent token is refused by the API for everything but reading and
 transferring, which it does over MCP.
 
@@ -94,7 +94,7 @@ API-only. See the [root README](../../README.md#roles) for what the roles actual
 | `AUTH_URL` | `http://localhost:9081` |
 | `TODO_URL` | `http://localhost:9082` |
 | `AGENT_URL` | `http://localhost:9083` |
-| `ACCOUNT_URL` | `http://localhost:9084` |
+| `WALLET_URL` | `http://localhost:9084` |
 
 ## Running it alone
 
@@ -106,7 +106,7 @@ node apps/web/server.js     # with the four services already up
 
 `auth.test.js` covers the authentication paths only: the proxy leg to auth-service (method, body,
 `Authorization` header and the provider 302 pass through; a dead upstream answers a JSON 502), the routing
-of `/api/agents*` to agent-service and `/api/bank*` to account-service, and the 401 rules in `app.js`. Plain `node --test`, no dependencies.
+of `/api/agents*` to agent-service and `/api/wallets*` to wallet-service, and the 401 rules in `app.js`. Plain `node --test`, no dependencies.
 
 ```bash
 npm test --prefix apps/web

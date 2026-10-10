@@ -29,8 +29,8 @@ COPY --from=build /src/apps/agent-service/target/agent-service-*.jar app.jar
 EXPOSE 9083
 CMD ["java", "-jar", "app.jar"]
 
-FROM runtime AS account-service
-COPY --from=build /src/apps/account-service/target/account-service-*.jar app.jar
+FROM runtime AS wallet-service
+COPY --from=build /src/apps/wallet-service/target/wallet-service-*.jar app.jar
 EXPOSE 9084
 CMD ["java", "-jar", "app.jar"]
 

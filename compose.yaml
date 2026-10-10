@@ -113,7 +113,7 @@ services:
       AGENTS_TODO_MCP_URL: http://todo-service:9082/mcp
       # The other servers an owner may attach by their compose name. Everything else must resolve to a public
       # address, or agent-service would POST into this network -- db, /internal -- on an owner's say-so.
-      AGENTS_TRUSTED_SERVER_URLS: http://account-service:9084/mcp
+      AGENTS_TRUSTED_SERVER_URLS: http://wallet-service:9084/mcp
     depends_on:
       db:
         condition: service_healthy
@@ -127,18 +127,18 @@ services:
       timeout: 3s
       retries: 20
 
-  account-service:
+  wallet-service:
     build:
       context: .
-      target: account-service
+      target: wallet-service
     # Same JVM arithmetic as todo-service: a small service with one MCP server and no client.
     mem_limit: 288m
     cpus: 1.0
     environment:
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=50
-      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/account
-      SPRING_DATASOURCE_USERNAME: account
-      SPRING_DATASOURCE_PASSWORD: account
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/wallet
+      SPRING_DATASOURCE_USERNAME: wallet
+      SPRING_DATASOURCE_PASSWORD: wallet
       AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
       AUTH_TOKEN_VERSIONS_URI: http://auth-service:9081/internal/token-versions
     depends_on:
@@ -147,7 +147,7 @@ services:
       auth-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9084/api/public/bank/stats || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9084/api/public/wallets/stats || exit 1"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -163,7 +163,7 @@ services:
       AUTH_URL: http://auth-service:9081
       TODO_URL: http://todo-service:9082
       AGENT_URL: http://agent-service:9083
-      ACCOUNT_URL: http://account-service:9084
+      WALLET_URL: http://wallet-service:9084
     ports:
       - "3000:3000"
     depends_on:
@@ -173,7 +173,7 @@ services:
         condition: service_healthy
       agent-service:
         condition: service_healthy
-      account-service:
+      wallet-service:
         condition: service_healthy
     # So `start` (compose up --wait) returns once node is actually listening, and `verify` right after it works.
     healthcheck:
