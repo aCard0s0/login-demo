@@ -21,12 +21,13 @@ agent/     Agent  AgentMcpServer  Access  OthersAccess  AgentRepository  AgentSe
            NewAgent  UpdateAgent  NewMcpServer  UpdateMcpServer  AgentResponse  McpServerResponse
 activity/  Activity  ActivityRepository  ActivityLog  ActivityResponse
 mcp/       AgentMcpServer (the /mcp endpoint and its handler)  McpTools  AgentTools  AccessDenied  ToolResult
-token/     JwtVerifier  Revocations  Caller          (the same three files as todo-service)  AgentTokens
+token/     AgentTokens   (JwtVerifier, Revocations and Caller come from the shared apps/token module)
 stats/     StatsController  PublicStats
 support/   AgentExceptionAdvice
 ```
 
 `mcp` depends on `agent` and `activity`; `agent` depends on `activity` and `token`; nothing points back.
+`com.demo.token` is the [`apps/token`](../token/README.md) module todo-service and account-service share.
 `AgentService` is the one place that decides whose agents a caller sees, and both the REST API and the tools
 one agent uses on another go through it.
 
@@ -161,8 +162,6 @@ back as `{"error": "..."}` like everywhere else.
 - **The forwarded token is the owner's full authority.** The built-in todo server checks it like the REST API
   does, so agent-service's READ/WRITE gate is the only thing between a READ agent and `delete_todo`. That is
   the feature; it is also why the gate is checked on every call and never left to the connecting agent.
-- **`token/` is the third copy** of the same three files. A shared module is the upgrade when a fourth
-  service appears.
 
 ## Running it alone
 
@@ -176,4 +175,4 @@ Tests: `AgentMcpServerTests` runs the permission rules end to end -- the real MC
 as an external agent would, against a real MCP server mounted in the same context -- including a permission
 flipped between two calls, an agent trying to widen its own access, and who may connect at all;
 `AgentServiceTests` the ownership rules and the activity log; `ApiContractTests` the 401, 404 and token
-shapes; `JwtVerifierTests` the token check against a throwaway JWKS.
+shapes. The token check itself is tested once, in `apps/token`.

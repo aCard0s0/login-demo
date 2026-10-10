@@ -1,6 +1,6 @@
 package com.demo.todoservice.todo;
 
-import com.demo.todoservice.token.Caller;
+import com.demo.token.Caller;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

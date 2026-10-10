@@ -2,7 +2,7 @@ package com.demo.agentservice.agent;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.token.Caller;
+import com.demo.token.Caller;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;

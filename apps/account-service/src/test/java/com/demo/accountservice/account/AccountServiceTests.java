@@ -3,7 +3,7 @@ package com.demo.accountservice.account;
 import com.demo.accountservice.account.dto.Access;
 import com.demo.accountservice.account.dto.NewAccount;
 import com.demo.accountservice.account.entities.Account;
-import com.demo.accountservice.token.Caller;
+import com.demo.token.Caller;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

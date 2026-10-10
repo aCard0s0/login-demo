@@ -18,6 +18,7 @@
     <description>Multi-module demo: auth-service + todo-service + agent-service + account-service + web frontend</description>
 
     <modules>
+        <module>apps/token</module>
         <module>apps/auth-service</module>
         <module>apps/todo-service</module>
         <module>apps/agent-service</module>

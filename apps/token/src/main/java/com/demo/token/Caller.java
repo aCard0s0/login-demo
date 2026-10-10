@@ -1,4 +1,4 @@
-package com.demo.accountservice.token;
+package com.demo.token;
 
 /**
  * Who is asking, out of the token they sent: an account id, the role auth-service stamped on it, and -- for a
@@ -6,8 +6,8 @@ package com.demo.accountservice.token;
  *
  * <p>An agent token's subject is the agent's owner, so {@code accountId} is always a user; {@code agentId}
  * says whether that user is at the keyboard or one of their agents is. The role is a plain string rather
- * than an enum copied over from auth-service: the two questions below answer "no" for anything
- * unrecognised, so an unknown or missing role lands on least privilege rather than on a crash.
+ * than an enum copied over from auth-service: every question below answers "no" for anything unrecognised,
+ * so an unknown or missing role lands on least privilege rather than on a crash.
  */
 public record Caller(String accountId, String role, Long agentId) {
 
@@ -27,7 +27,12 @@ public record Caller(String accountId, String role, Long agentId) {
         return "ADMIN".equals(role);
     }
 
-    /** How this caller is named on the transfers it makes. */
+    /** Whether this token may act as the given agent: any of the owner's own tokens, or an agent token for that very agent. */
+    public boolean mayActAs(Long agent) {
+        return agentId == null || agentId.equals(agent);
+    }
+
+    /** How this caller is named on the records it writes. */
     public String describe() {
         return isAgent() ? "agent " + agentId : "user " + accountId;
     }

@@ -1,6 +1,6 @@
 package com.demo.todoservice.todo;
 
-import com.demo.todoservice.token.Caller;
+import com.demo.token.Caller;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

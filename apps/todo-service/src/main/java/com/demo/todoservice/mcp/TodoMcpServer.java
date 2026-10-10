@@ -2,8 +2,8 @@ package com.demo.todoservice.mcp;
 
 import com.demo.todoservice.todo.Todo;
 import com.demo.todoservice.todo.TodoService;
-import com.demo.todoservice.token.Caller;
-import com.demo.todoservice.token.JwtVerifier;
+import com.demo.token.Caller;
+import com.demo.token.JwtVerifier;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;

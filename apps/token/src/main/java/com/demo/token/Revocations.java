@@ -1,4 +1,4 @@
-package com.demo.agentservice.token;
+package com.demo.token;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,14 +16,14 @@ import java.util.Map;
 /**
  * Which tokens auth-service has revoked, so a suspended or signed-out account is turned away here too and not
  * only at auth-service. Tokens are checked in process, so without this a revoked one would keep working
- * against the agents until it expired.
+ * against the service until it expired.
  *
  * <p>auth-service publishes, per account it has ever revoked, the token version a token must carry to count.
  * The list is cached and re-read at most every few seconds, so a revocation bites here within that window
  * rather than on the next request.
  */
 // ponytail: fails open. If auth-service cannot be reached the last list stands, so a revocation made while it
-// is down is not seen here until it is back. Failing closed would take the agents down with auth-service.
+// is down is not seen here until it is back. Failing closed would take the service down with auth-service.
 @Component
 public class Revocations {
 

@@ -1,8 +1,8 @@
 package com.demo.accountservice.account;
 
 import com.demo.accountservice.account.dto.*;
-import com.demo.accountservice.token.Caller;
-import com.demo.accountservice.token.JwtVerifier;
+import com.demo.token.Caller;
+import com.demo.token.JwtVerifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

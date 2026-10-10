@@ -12,6 +12,7 @@ compose.yaml            db + the five services
 Dockerfile              one file, one build, five runtime stages
 docker/initdb.sql       one database and one role per service
 .env.example            the admin credentials and OAuth client secrets compose reads from .env
+apps/token              verifying those tokens: the one copy the three services below share
 apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
 apps/todo-service       per-account todos, and their MCP server  :9082
 apps/agent-service      agents, their MCP servers, permissions   :9083
@@ -28,6 +29,7 @@ Each service documents itself:
 | agent-service | agents as MCP servers: the servers each may use, READ/WRITE enforced per tool call | [apps/agent-service](apps/agent-service/README.md) |
 | account-service | money accounts for users and their agents, transfers, READ/WRITE grants per agent, and its `/mcp` | [apps/account-service](apps/account-service/README.md) |
 | web | the pages and the one-origin proxy | [apps/web](apps/web/README.md) |
+| token | `JwtVerifier`, `Revocations` and `Caller`: a plain jar, no service, that todo-, agent- and account-service depend on | [apps/token](apps/token/README.md) |
 
 ## Package convention
 
@@ -39,7 +41,8 @@ Two rules hold across all of them:
 
 - **The arrows point one way.** `token` knows nothing about accounts (it signs an id, an email, a name and a
   role -- not an `Account`), `account` uses `token` to resolve a caller, and `session` uses both to turn a
-  password into one.
+  password into one. The verifying half of `token` lives once, in the `apps/token` module, and the three
+  services that check tokens in process depend on it rather than carrying a copy each.
 - **`stats` is the unauthenticated corner** of each service, kept apart so the trust boundary is visible in
   the tree rather than buried in a comment, and **`support`** holds the one cross-cutting piece each service
   has: the advice that renders every rejection as `{"error": "..."}`.

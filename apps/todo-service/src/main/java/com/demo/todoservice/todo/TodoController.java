@@ -1,6 +1,6 @@
 package com.demo.todoservice.todo;
 
-import com.demo.todoservice.token.JwtVerifier;
+import com.demo.token.JwtVerifier;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;

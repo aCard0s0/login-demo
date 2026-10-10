@@ -16,12 +16,13 @@ together.
 ```
 todo/     Todo  TodoRepository  TodoService  TodoController  NewTodo  UpdateTodo  TodoResponse
 mcp/      TodoMcpServer
-token/    JwtVerifier  Revocations  Caller
 stats/    StatsController  PublicStats
 support/  TodoExceptionAdvice
 ```
 
-`todo` depends on `token` for who the caller is; `mcp` depends on both and nothing points back. `stats` is the unauthenticated corner,
+Plus `com.demo.token` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`apps/token`](../token/README.md)
+module, which agent-service and account-service use too. `todo` depends on it for who the caller is; `mcp`
+depends on both and nothing points back. `stats` is the unauthenticated corner,
 kept apart so the trust boundary shows up in the tree.
 
 ## Who is asking
@@ -31,10 +32,11 @@ so a token asking for `none` or a symmetric algorithm is rejected before its sig
 claims verifier requires `sub` and `exp` -- a token with no expiry is refused outright rather than treated
 as one that never expires.
 
-What comes back is a `Caller`: an account id and a role. The role is a plain string, not an enum copied over
-from auth-service. The two services share no code on purpose, and this one only ever asks two questions of
-it -- both of which answer "no" for anything unrecognised, so an unknown role, or a token with no `role`
-claim at all, lands on least privilege instead of on a crash.
+What comes back is a `Caller`: an account id, a role and, for an agent token, the agent it is pinned to. The
+role is a plain string, not an enum copied over from auth-service -- the verifying side shares no code with
+the minting side on purpose -- and this service only ever asks two questions of it, both of which answer
+"no" for anything unrecognised, so an unknown role, or a token with no `role` claim at all, lands on least
+privilege instead of on a crash.
 
 That is the one place this service differs from auth-service: the role is read **from the token's claims**,
 not from a database row. Asking auth-service per request is exactly what the JWKS handoff exists to avoid,
@@ -128,8 +130,7 @@ docker compose up -d db                  # it still needs a database
 ./mvnw -pl apps/todo-service test        # SQLite backed: needs nothing running
 ```
 
-Tests: `TodoServiceTests` for the ownership and role rules, `JwtVerifierTests` for the token check -- the
-only thing standing between a stranger and somebody's todo list, so it runs against a real throwaway JWKS
-server rather than a mock -- and `TodoMcpServerTests`, which drives `/mcp` with the real MCP client over real
+Tests: `TodoServiceTests` for the ownership and role rules -- the token check itself is tested once, in
+`apps/token` -- and `TodoMcpServerTests`, which drives `/mcp` with the real MCP client over real
 HTTP: the annotation on `list_todos` and on nothing else, two callers who cannot see each other's todos, and
 a missing token answered with an error result.

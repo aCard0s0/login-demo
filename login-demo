@@ -34,7 +34,7 @@ cd "$ROOT"
 PROJECT="${LOGIN_DEMO_PROJECT:-login-demo}"; PORT="${LOGIN_DEMO_PORT:-3000}"
 COMPOSE_FILE="${LOGIN_DEMO_COMPOSE_FILE:-$ROOT/compose.yaml}"
 SERVICES="db auth-service todo-service agent-service account-service web"   # valid targets; feeds help and did-you-mean
-MODULES="auth-service todo-service agent-service account-service"          # the Maven modules, a subset of SERVICES
+MODULES="token auth-service todo-service agent-service account-service"    # the Maven modules `test` accepts
 DRY_RUN=""; ASSUME_YES=""; VERBOSE=""; TMP_DIR=""; CURRENT_CMD=""
 TARGETS=(); OPT_BUILD=""; OPT_NOCACHE=""
 # ── output: colour only on a TTY; values on stdout, prose on stderr ──

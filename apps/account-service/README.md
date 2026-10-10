@@ -16,12 +16,12 @@ account/  Account  AccountPermission  Access  Transfer  AccountRepository  Trans
           AccountService  AccountController  NewAccount  NewTransfer  Deposit  SetPermission
           AccountResponse  PermissionResponse  TransferResponse
 mcp/      AccountMcpServer
-token/    JwtVerifier  Revocations  Caller          (the same three files as agent-service)
 stats/    StatsController  PublicStats
 support/  AccountExceptionAdvice
 ```
 
-`account` depends on `token` for who the caller is; `mcp` depends on both and nothing points back.
+Plus `com.demo.token` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`apps/token`](../token/README.md)
+module. `account` depends on it for who the caller is; `mcp` depends on both and nothing points back.
 
 ## Who is asking
 

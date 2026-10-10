@@ -1,4 +1,4 @@
-package com.demo.todoservice.token;
+package com.demo.token;
 
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.jwk.source.JWKSource;
@@ -21,7 +21,7 @@ import java.util.Set;
  * Checks the caller's token against auth-service's public key, in process.
  *
  * <p>This replaces a call to auth-service on every single request. The key comes from its JWKS endpoint and is
- * cached; because the signing is asymmetric, todo-service holds only the public half and could never mint a
+ * cached; because the signing is asymmetric, each service holds only the public half and could never mint a
  * token of its own. The key selector is pinned to RS256, so a token that asks for "none" or a symmetric
  * algorithm is rejected before its signature is ever looked at.
  */
@@ -55,7 +55,13 @@ public class JwtVerifier {
             }
             // A token with no role claim is read as a plain user: least privilege, rather than a 500.
             Object role = claims.getClaim("role");
-            return new Caller(claims.getSubject(), role == null ? "USER" : String.valueOf(role));
+            // An agent token carries the one agent it was minted for; any other token carries none.
+            Long agent = "AGENT".equals(role) ? claims.getLongClaim("agent") : null;
+            // Without the claim the pin would silently become "every agent of the owner": refuse instead.
+            if ("AGENT".equals(role) && agent == null) {
+                throw new IllegalStateException("agent token names no agent");
+            }
+            return new Caller(claims.getSubject(), role == null ? "USER" : String.valueOf(role), agent);
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid or expired token");
         }
