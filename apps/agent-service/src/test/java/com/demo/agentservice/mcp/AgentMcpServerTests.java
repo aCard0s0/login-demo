@@ -21,6 +21,7 @@ import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecifi
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.ImageContent;
 import io.modelcontextprotocol.spec.McpSchema.InitializeResult;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
@@ -82,12 +83,25 @@ class AgentMcpServerTests {
                     .build();
             McpServer.sync(transport).serverInfo("fake", "0").capabilities(ServerCapabilities.builder().tools(false).build())
                     .tools(tool("read_thing", ToolAnnotations.builder().readOnlyHint(true).build()),
-                            tool("write_thing", null))
+                            tool("write_thing", null),
+                            picture())
                     .build();
             ServletRegistrationBean<HttpServletStatelessServerTransport> servlet = new ServletRegistrationBean<>(transport, "/fake-mcp");
             servlet.setName("fake-mcp");
             servlet.setAsyncSupported(true);
             return servlet;
+        }
+
+        /** A tool whose result is not text: a one-pixel PNG plus structured content, as a real server might answer. */
+        static final String PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+        private static SyncToolSpecification picture() {
+            Tool tool = Tool.builder().name("picture_thing").description("a picture").inputSchema(Map.of("type", "object")).build();
+            return SyncToolSpecification.builder().tool(tool).callHandler((context, request) -> {
+                CALLS.add("picture_thing");
+                return CallToolResult.builder().addTextContent("here you go").addContent(new ImageContent(null, PNG, "image/png"))
+                        .structuredContent(Map.of("width", 1, "height", 1)).build();
+            }).build();
         }
 
         private static SyncToolSpecification tool(String name, ToolAnnotations annotations) {
@@ -199,7 +213,7 @@ class AgentMcpServerTests {
         Agent agent = agentWith(Access.WRITE, OthersAccess.NONE);
         Long server = agent.getServers().get(0).getId();
         try (McpSyncClient client = connect("tok-100", agent.getId())) {
-            assertEquals(List.of("fake__read_thing", "fake__write_thing"), names(client));
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client));
             assertFalse(Boolean.TRUE.equals(client.callTool(new CallToolRequest("fake__write_thing", Map.of())).isError()));
 
             // The owner flips the server to READ while the agent is connected.
@@ -293,12 +307,31 @@ class AgentMcpServerTests {
         assertEquals(2, log(agent.getId(), Activity.CONNECTED).size(), "only the two accepted connections are in the log");
     }
 
+    /** The gateway passes a result through whole: an image is still an image on the other side, and structured content survives. */
+    @Test
+    void imagesAndStructuredContentComeThroughTheGatewayUnchanged() {
+        Agent agent = agentWith(Access.WRITE, OthersAccess.NONE);
+        try (McpSyncClient client = connect("tok-100", agent.getId())) {
+            CallToolResult result = client.callTool(new CallToolRequest("fake__picture_thing", Map.of()));
+            assertFalse(Boolean.TRUE.equals(result.isError()));
+            assertEquals(2, result.content().size(), result.content().toString());
+            assertEquals("here you go", text(result));
+            ImageContent image = (ImageContent) result.content().get(1);
+            assertEquals("image/png", image.mimeType());
+            assertEquals(FakeMcp.PNG, image.data(), "the bytes are the server's, not a toString of them");
+            assertEquals(Map.of("width", 1, "height", 1), result.structuredContent());
+        }
+        String logged = log(agent.getId(), Activity.TOOL_CALL).get(0);
+        assertTrue(logged.startsWith("fake__picture_thing {} -> ok: here you go [image image/png] [structured {"), logged);
+        assertTrue(logged.contains("width=1") && logged.contains("height=1") && !logged.contains(FakeMcp.PNG), "a summary, never the bytes: " + logged);
+    }
+
     /** The URL policy runs again at connect time, against what the name resolves to then, not only when the row was saved. */
     @Test
     void aServerTrustedWhenSavedButNotWhenConnectingIsRefusedAtConnect() {
         Agent agent = agentWith(Access.WRITE, OthersAccess.NONE);
         try (McpSyncClient client = connect("tok-100", agent.getId())) {
-            assertEquals(List.of("fake__read_thing", "fake__write_thing"), names(client), "trusted: reachable");
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client), "trusted: reachable");
             // The deployment stops trusting the address between two calls. Same effect as the name moving to a private address.
             env.getPropertySources().addFirst(new MapPropertySource("untrust", Map.of("agents.trusted-server-urls", "")));
             try {
@@ -309,7 +342,7 @@ class AgentMcpServerTests {
             } finally {
                 env.getPropertySources().remove("untrust");
             }
-            assertEquals(List.of("fake__read_thing", "fake__write_thing"), names(client), "trusted again: reachable again");
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client), "trusted again: reachable again");
         }
         assertEquals(List.of(), CALLS, "nothing reached the server while it was refused");
         List<String> calls = log(agent.getId(), Activity.TOOL_CALL);

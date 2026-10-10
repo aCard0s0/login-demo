@@ -9,8 +9,6 @@ import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
-import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,7 +20,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * The MCP servers an agent's owner attached, seen through that agent's permissions.
@@ -84,8 +81,8 @@ final class McpTools {
             if (!server.getAccess().allows(readOnly(tool))) {
                 throw new AccessDenied("needs WRITE on server '" + server.getName() + "' (has " + server.getAccess() + ")");
             }
-            CallToolResult result = client.callTool(new CallToolRequest(tool.name(), args));
-            return new ToolResult(text(result), Boolean.TRUE.equals(result.isError()));
+            // Passed through whole: an image, an embedded resource or structured content reaches the model as it left the server.
+            return ToolResult.of(client.callTool(new CallToolRequest(tool.name(), args)));
         }
     }
 
@@ -161,14 +158,5 @@ final class McpTools {
             copy.annotations(tool.annotations());
         }
         return copy.build();
-    }
-
-    private static String text(CallToolResult result) {
-        if (result.content() == null || result.content().isEmpty()) {
-            return "";
-        }
-        return result.content().stream()
-                .map(c -> c instanceof TextContent t ? t.text() : String.valueOf(c))
-                .collect(Collectors.joining("\n"));
     }
 }

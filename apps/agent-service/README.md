@@ -71,6 +71,11 @@ server to READ, or removes it, while an agent is connected is obeyed from its ne
 calls a tool it was never offered is refused all the same. A refusal becomes an `isError` tool result the
 agent can read and a `tool_denied` line in the log.
 
+A result that is allowed is passed through **whole**: the content list -- text, images, audio, embedded
+resources, resource links -- and any `structuredContent` reach the connecting agent exactly as the server
+produced them, MIME types and bytes included. Only the activity log flattens it, to the text parts plus a
+`[image image/png]`-style marker for anything else.
+
 Tool names reach the client as `<server>__<tool>`, so two servers with the same tool cannot collide; server
 names are therefore short, lower-case and unique per agent.
 
@@ -115,7 +120,7 @@ Plain text lines, newest first, a hundred at a time, deleted with the agent:
 | kind | when |
 |---|---|
 | `connected` | an MCP client sent `initialize`: its name and version |
-| `tool_call` | a tool ran: `todos__list_todos {} -> ok: …` or `-> error: …`; also a server that could not be reached |
+| `tool_call` | a tool ran: `todos__list_todos {} -> ok: …` or `-> error: …`, text as it is and `[image image/png]`, `[structured {…}]` for the rest; also a server that could not be reached |
 | `tool_denied` | a tool was refused and why: `todos__add_todo: needs WRITE on server 'todos' (has READ)` |
 | `config_changed` | anything edited, by the owner or by another agent; also `agent token issued` and `agent tokens revoked` |
 
@@ -200,7 +205,8 @@ docker compose up -d db
 Tests: `AgentMcpServerTests` runs the permission rules end to end -- the real MCP client connects to `/mcp`
 as an external agent would, against a real MCP server mounted in the same context -- including a permission
 flipped between two calls, an agent trying to widen its own access, and who may connect at all;
-including a server trusted when saved and refused at connect; `AgentServiceTests` the ownership rules, the
+including a server trusted when saved and refused at connect, and an image with structured content coming
+through unchanged; `AgentServiceTests` the ownership rules, the
 activity log and a private URL refused on add and on edit; `ServerUrlsTests` every refused address category,
 exact trust, and a name that moves to a private address between save and connect, all against a resolver
 table rather than DNS; `ApiContractTests` the 401, 404 and token shapes. The token check itself is tested
