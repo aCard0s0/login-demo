@@ -101,15 +101,23 @@ final class McpTools {
      */
     private static List<Tool> tools(AgentMcpServer server, String bearer, ServerUrls urls) {
         urls.checkBeforeConnect(server.getUrl());
-        return LISTINGS.get(server.getUrl(), credential(server, bearer), () -> {
+        return LISTINGS.get(server.getUrl(), credential(server, bearer, urls), () -> {
             try (McpSyncClient client = connect(server, bearer, urls)) {
                 return client.listTools().tools();
             }
         });
     }
 
-    private static String credential(AgentMcpServer server, String bearer) {
-        return server.isForwardCallerToken() ? "Bearer " + bearer : server.getAuthHeader();
+    /**
+     * What the server is sent as {@code Authorization}. The caller's token goes only to the deployment's own servers:
+     * {@code AgentService} refuses to save the forward on any other URL, and this is the same rule at the moment of
+     * use, so a trusted list edited since the row was saved cannot leak the token either.
+     */
+    private static String credential(AgentMcpServer server, String bearer, ServerUrls urls) {
+        if (server.isForwardCallerToken()) {
+            return urls.trusted(server.getUrl()) ? "Bearer " + bearer : null;
+        }
+        return server.getAuthHeader();
     }
 
     /** The server whose name prefixes the tool name; the longest match when one server's name begins another's. */
@@ -130,7 +138,7 @@ final class McpTools {
     private static McpSyncClient connect(AgentMcpServer server, String bearer, ServerUrls urls) {
         // Against what the name resolves to right now, not only what it resolved to when the row was saved.
         urls.checkBeforeConnect(server.getUrl());
-        String auth = credential(server, bearer);
+        String auth = credential(server, bearer, urls);
         URI url = URI.create(server.getUrl());
         String base = url.getScheme() + "://" + url.getRawAuthority();
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base)

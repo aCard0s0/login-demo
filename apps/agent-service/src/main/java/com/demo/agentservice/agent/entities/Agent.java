@@ -1,6 +1,5 @@
 package com.demo.agentservice.agent.entities;
 
-import com.demo.agentservice.agent.dto.OthersAccess;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

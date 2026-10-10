@@ -1,4 +1,4 @@
-package com.demo.agentservice.agent.dto;
+package com.demo.agentservice.agent.entities;
 
 /** What an agent may do to its owner's other agents: nothing, read their setup and history, or change them too. */
 public enum OthersAccess {

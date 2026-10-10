@@ -1,5 +1,6 @@
-package com.demo.authservice.user;
+package com.demo.authservice.internal;
 
+import com.demo.authservice.user.UserService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 

@@ -275,7 +275,9 @@ Every new agent starts with the built-in **todos** server as READ: todo-service 
 `/mcp`, with `list_todos` read-only and `add_todo`, `update_todo`, `delete_todo` not. The agent acts **as its
 owner** -- the token it connected with is forwarded to that server -- so it can only ever see the owner's
 todos. Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header, which
-is encrypted at rest with `AUTH_HEADER_KEY` from `.env` (required, like the admin credentials).
+is encrypted at rest with `AUTH_HEADER_KEY` from `.env` (required, like the admin credentials). The owner's
+token is never forwarded to one of those: it is good everywhere, so it goes only to the deployment's own
+servers (`AGENTS_TRUSTED_SERVER_URLS` and the built-in todo one).
 
 An agent reads or changes the owner's other agents only when its **other agents** setting says READ or WRITE,
 through built-in tools scoped to the same owner; it can never change its own setup.

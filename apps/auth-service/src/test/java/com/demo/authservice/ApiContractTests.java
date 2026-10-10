@@ -124,7 +124,7 @@ class ApiContractTests {
 
     @Test
     void rejectedInputComesBackAs400AndTheErrorShape() throws Exception {
-        register("Alonzo", "alonzo@example.com", "church-1903");
+        String token = register("Alonzo", "alonzo@example.com", "church-1903");
 
         mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(json("Alonzo again", "alonzo@example.com", "church-1903")))
@@ -137,11 +137,12 @@ class ApiContractTests {
                 .andExpect(jsonPath("$.error").isString());
 
         // Rejections MVC itself makes -- a body that will not parse, an id that is not a number, a path that
-        // does not exist -- must come back in the same shape, not as Spring's ProblemDetail.
+        // does not exist -- must come back in the same shape, not as Spring's ProblemDetail. The caller is
+        // resolved before the path and body are bound, so these need a real token: a bad one is 401 first.
         mvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content("{not json"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").isString());
-        mvc.perform(put("/api/users/not-a-number/role").header("Authorization", "Bearer x")
+        mvc.perform(put("/api/users/not-a-number/role").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON).content(role("ADMIN")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").isString());
@@ -149,7 +150,7 @@ class ApiContractTests {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").isString());
         // The admin page shows this text, so an unknown role has to say what the known ones are.
-        mvc.perform(put("/api/users/1/role").header("Authorization", "Bearer x")
+        mvc.perform(put("/api/users/1/role").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON).content(role("KING")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error", containsString("MODERATOR")));

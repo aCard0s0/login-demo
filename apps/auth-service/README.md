@@ -11,20 +11,28 @@ Split by subject rather than by layer -- one package holds its entity, service, 
 together, so a change to one subject stays in one folder.
 
 ```
-user/     UserService  UserController  AdminSeeder  AgentTokenController  TokenVersionController
+user/      UserService  UserController  CurrentUserResolver  AdminSeeder
   entities/  User  Role  UserRepository  AgentTokenVersion  AgentTokenVersionRepository
   dto/       UserResponse  NewUser  UpdateUser  RoleChange  Suspension
-session/  Session  SessionService  SessionController  LoginRequest  LoginResponse
-token/    Tokens  JwksController
-oauth/    OAuthProvider  OAuthProperties  OAuthService  OAuthController
-stats/    StatsController  PublicStats
-support/  AuthExceptionAdvice  AttemptWindow  TooManyAttemptsException
+session/   Session  SessionService  SessionController  LoginRequest  LoginResponse
+token/     Tokens  JwksController
+oauth/     OAuthProvider  OAuthProperties  OAuthService  OAuthController
+internal/  AgentTokenController  TokenVersionController   (the /internal endpoints: compose network only)
+stats/     StatsController  PublicStats
+support/   AuthExceptionAdvice  AttemptWindow  Passwords
 ```
 
-The dependencies point one way: `token` <- `user` <- {`session`, `oauth`} -- the two ways in, neither
-knowing about the other. `Tokens.issue` takes an id, an email, a name and a role rather than a `User`,
-which is what keeps `token` free of the user package. `stats` is the unauthenticated corner, kept apart
-so the trust boundary shows up in the tree.
+The dependencies point one way: `token` <- `user` <- {`session`, `oauth`, `internal`} -- the two ways in and
+the compose-only corner, none knowing about the others. `Tokens.issue` takes an id, an email, a name and a
+role rather than a `User`, which is what keeps `token` free of the user package. `stats` is the
+unauthenticated corner and `internal` the never-proxied one, each kept apart so the trust boundary shows up
+in the tree rather than in a comment.
+
+A controller takes the caller as a `User` parameter, which `CurrentUserResolver` reads off the
+`Authorization` header before the method runs -- the same shape as `Caller` in the other services, except
+that this one re-reads the row. Every refusal is a `ResponseStatusException` with the status it means (400,
+401, 403, 404, 429), rendered as `{"error": "..."}` by `AuthExceptionAdvice`; there is no catch-all for
+`IllegalArgumentException`, which would hand a library's message to the client as a 400.
 
 ## Roles
 
@@ -96,6 +104,12 @@ then have to be switched off. Only the hash is stored.
   sets no `X-Forwarded-For`; the trade is that a run of bots makes honest registrations wait the window out.
 - Editing a user always requires the current password, even to change only the name, so a borrowed tab
   cannot quietly take a user over.
+- A new password kills every token the user held, the one that asked included: whoever changes a password
+  usually suspects someone else has the old one, and that someone's session must not outlive it. The answer
+  to `PUT /api/users/me` carries a fresh `token`, which the profile page swaps in rather than being signed out.
+- A password longer than 72 bytes is refused at registration and treated as plainly wrong at login, never
+  handed to BCrypt (which throws past 72 since Spring Security 7); every check costs one hash either way.
+  All of this is `Passwords`, the one place a password is hashed or compared.
 
 ## Signing in with Google or GitHub
 
@@ -257,7 +271,7 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 | POST | `/api/users` | `{name, email, password}` -> 201 `{id, name, email, role}`, always `USER`; 429 past the cap |
 | POST | `/api/login` | `{email, password}` -> `{token, name, email, role}`, 401, or 429 once locked out |
 | GET | `/api/users/me` | the caller themselves; an agent token is 403 |
-| PUT | `/api/users/me` | `{name, email, currentPassword, newPassword?}`; an agent token is 403 |
+| PUT | `/api/users/me` | `{name, email, currentPassword, newPassword?}` -> the user plus a fresh `token`; a new password revokes every other; an agent token is 403 |
 | GET | `/api/users` | everyone -- admin and moderator only, else 403 |
 | PUT | `/api/users/{id}/role` | `{role}` -- admin only, else 403 |
 | PUT | `/api/users/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |

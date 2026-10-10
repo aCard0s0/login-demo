@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -21,6 +20,10 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
+/**
+ * Who is asking is the {@link User} parameter, resolved from the Authorization header by
+ * {@link CurrentUserResolver} before any method here runs; registration is the one endpoint without it.
+ */
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
@@ -39,22 +42,23 @@ public class UserController {
 
     /** The caller themselves. Whoever holds the token is the only one who can ask. */
     @GetMapping("/me")
-    public UserResponse me(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        return UserResponse.of(caller(authorization));
+    public UserResponse me(User caller) {
+        return UserResponse.of(caller);
     }
 
+    /**
+     * Edits the caller. The answer carries a fresh token: a new password revokes every token the user held,
+     * this one included, and the page swaps to the new one rather than being signed out mid-edit.
+     */
     @PutMapping("/me")
-    public UserResponse update(@RequestHeader(value = "Authorization", required = false) String authorization,
-                                  @RequestBody UpdateUser req) {
-        User updated = users.update(caller(authorization).getId(),
-                req.name(), req.email(), req.currentPassword(), req.newPassword());
-        return UserResponse.of(updated);
+    public UserResponse update(User caller, @RequestBody UpdateUser req) {
+        User updated = users.update(caller.getId(), req.name(), req.email(), req.currentPassword(), req.newPassword());
+        return UserResponse.of(updated, users.issue(updated));
     }
 
     /** Everyone, for the roles that read everyone. A user asking for this gets a 403, not a filtered list. */
     @GetMapping
-    public List<UserResponse> all(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        User caller = caller(authorization);
+    public List<UserResponse> all(User caller) {
         if (!caller.getRole().readsEveryone()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "you may only read yourself");
         }
@@ -66,47 +70,27 @@ public class UserController {
      * for a role and {@link #update} cannot change one, so this endpoint is the single door.
      */
     @PutMapping("/{id}/role")
-    public UserResponse setRole(@RequestHeader(value = "Authorization", required = false) String authorization,
-                                   @PathVariable Long id,
-                                   @RequestBody RoleChange req) {
-        return UserResponse.of(users.changeRole(admin(authorization), id, req.role()));
+    public UserResponse setRole(User caller, @PathVariable Long id, @RequestBody RoleChange req) {
+        return UserResponse.of(users.changeRole(admin(caller), id, req.role()));
     }
 
     /** Suspends or reactivates another user. Admin only. */
     @PutMapping("/{id}/suspended")
-    public UserResponse setSuspended(@RequestHeader(value = "Authorization", required = false) String authorization,
-                                        @PathVariable Long id,
-                                        @RequestBody Suspension req) {
-        return UserResponse.of(users.setSuspended(admin(authorization), id, req.suspended()));
+    public UserResponse setSuspended(User caller, @PathVariable Long id, @RequestBody Suspension req) {
+        return UserResponse.of(users.setSuspended(admin(caller), id, req.suspended()));
     }
 
     /** Signs another user out everywhere by killing every token it holds. Admin only. */
     @PostMapping("/{id}/revoke")
-    public UserResponse revoke(@RequestHeader(value = "Authorization", required = false) String authorization,
-                                  @PathVariable Long id) {
-        admin(authorization);
+    public UserResponse revoke(User caller, @PathVariable Long id) {
+        admin(caller);
         return UserResponse.of(users.revokeTokens(id));
     }
 
-    private User admin(String authorization) {
-        User caller = caller(authorization);
+    private static User admin(User caller) {
         if (caller.getRole() != Role.ADMIN) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "only an admin can do that");
         }
         return caller;
-    }
-
-    /**
-     * The user behind the Authorization header, or a 401. There is no logout endpoint to pair with this:
-     * a signed token is good until it expires, so logging out is the client dropping the token it holds.
-     *
-     * <p>The token travels in the header rather than a query parameter so it stays out of access logs and
-     * Referer headers; callers send it the same way on every endpoint. The role is read from the user
-     * rather than from the token's claims, so a demotion bites at once instead of at the next login.
-     */
-    private User caller(String authorization) {
-        String token = authorization == null ? "" : authorization.replaceFirst("(?i)^Bearer ", "");
-        return users.byToken(token)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid or expired token"));
     }
 }

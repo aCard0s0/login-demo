@@ -1,5 +1,7 @@
 package com.demo.agentservice.agent.dto;
 
+import com.demo.agentservice.agent.entities.Access;
+
 import java.util.List;
 
 /** A null field means "leave it alone"; an empty {@code authHeader} clears the stored one, an empty {@code readOnlyTools} marks none. */

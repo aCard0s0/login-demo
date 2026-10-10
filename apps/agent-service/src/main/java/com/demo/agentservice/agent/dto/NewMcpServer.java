@@ -1,5 +1,7 @@
 package com.demo.agentservice.agent.dto;
 
+import com.demo.agentservice.agent.entities.Access;
+
 import java.util.List;
 
 /** {@code readOnlyTools}: the tools READ may offer on a server the deployment does not trust; null or empty means none. */
