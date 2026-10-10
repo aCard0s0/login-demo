@@ -1,8 +1,8 @@
 package com.demo.accountservice.mcp;
 
-import com.demo.accountservice.account.Account;
+import com.demo.accountservice.account.entities.Account;
 import com.demo.accountservice.account.AccountService;
-import com.demo.accountservice.account.Transfer;
+import com.demo.accountservice.account.entities.Transfer;
 import com.demo.accountservice.token.Caller;
 import com.demo.accountservice.token.JwtVerifier;
 import io.modelcontextprotocol.common.McpTransportContext;

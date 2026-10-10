@@ -1,8 +1,8 @@
 package com.demo.accountservice.mcp;
 
-import com.demo.accountservice.account.Access;
+import com.demo.accountservice.account.dto.Access;
 import com.demo.accountservice.account.AccountService;
-import com.demo.accountservice.account.NewAccount;
+import com.demo.accountservice.account.dto.NewAccount;
 import com.demo.accountservice.token.Caller;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
