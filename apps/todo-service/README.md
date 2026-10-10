@@ -20,7 +20,7 @@ stats/    StatsController  PublicStats
 support/  TodoExceptionAdvice
 ```
 
-Plus `com.demo.token` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`apps/token`](../token/README.md)
+Plus `com.demo.token` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`../../libs/token`](../../libs/token/README.md)
 module, which agent-service and account-service use too. `todo` depends on it for who the caller is; `mcp`
 depends on both and nothing points back. `stats` is the unauthenticated corner,
 kept apart so the trust boundary shows up in the tree.
@@ -137,7 +137,7 @@ docker compose up -d db                  # it still needs a database
 ```
 
 Tests: `TodoServiceTests` for the ownership and role rules, `ApiContractTests` for the 401 and the 403 an
-agent token gets on every verb -- the token check itself is tested once, in `apps/token` -- and
+agent token gets on every verb -- the token check itself is tested once, in `../../libs/token` -- and
 `TodoMcpServerTests`, which drives `/mcp` with the real MCP client over real
 HTTP: the annotation on `list_todos` and on nothing else, two callers who cannot see each other's todos, and
 a missing token answered with an error result.

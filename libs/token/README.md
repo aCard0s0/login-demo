@@ -36,6 +36,6 @@ Both beans are `@Component`s under `com.demo.token`, outside each service's own 
 
 ## Tests
 
-`./mvnw -pl apps/token test`. `JwtVerifierTests` runs against a real throwaway JWKS server rather than a
+`./mvnw -pl libs/token test`. `JwtVerifierTests` runs against a real throwaway JWKS server rather than a
 mock: the advertised key and nothing else, expiry, the revocation feed for accounts and for one agent alone,
 and the agent claims.

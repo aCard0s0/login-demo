@@ -4,6 +4,7 @@ WORKDIR /src
 COPY .mvn .mvn
 COPY mvnw pom.xml ./
 COPY apps apps
+COPY libs libs
 # Cache mount rather than a copy-poms-first dance: one line, and it survives changes to the module list.
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -DskipTests package
 

@@ -39,7 +39,7 @@ class ApiContractTests {
     @Autowired
     TodoService todos;
 
-    /** The verifier is tested against a real JWKS in apps/token; here it just maps two fixed tokens to two callers. */
+    /** The verifier is tested against a real JWKS in libs/token; here it just maps two fixed tokens to two callers. */
     @MockitoBean
     JwtVerifier jwt;
 

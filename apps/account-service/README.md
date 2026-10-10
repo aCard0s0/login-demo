@@ -20,7 +20,7 @@ stats/    StatsController  PublicStats
 support/  AccountExceptionAdvice
 ```
 
-Plus `com.demo.token` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`apps/token`](../token/README.md)
+Plus `com.demo.token` -- `JwtVerifier`, `Revocations`, `Caller` -- from the shared [`../../libs/token`](../../libs/token/README.md)
 module. `account` depends on it for who the caller is; `mcp` depends on both and nothing points back.
 
 ## Who is asking
