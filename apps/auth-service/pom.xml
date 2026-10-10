@@ -24,10 +24,54 @@
             <artifactId>web-errors</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Sign-in with a provider: the flow lives in libs/auth-provider; this service offers these seven,
+             each off until a deployment configures it. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-google</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-github</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-microsoft</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-apple</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-x</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-linkedin</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-provider-discord</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- BCrypt only. The full security starter would install a filter chain we would then have to switch off. -->
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <!-- The verifier todo-, agent- and wallet-service run, so a test can check revocation from their side. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>auth-client</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
         </dependency>
         <!-- Boot 4 moved MockMvc out of spring-boot-starter-test into its own module. -->
         <dependency>

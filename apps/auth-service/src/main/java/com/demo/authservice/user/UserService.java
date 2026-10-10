@@ -49,7 +49,8 @@ public class UserService {
         this.tokens = tokens;
     }
 
-    @Transactional
+    // No @Transactional: a transaction takes a pooled connection at entry and would hold it idle through the
+    // BCrypt round below. The two statements need no shared transaction; the unique index is the real guard.
     public User register(String name, String email, String password) {
         if (registrations.exceeded("")) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "too many registrations right now, try again in "
@@ -75,8 +76,10 @@ public class UserService {
      * password is usually doing it because someone else may have the old one, and that someone's session must
      * not outlive it. The controller hands the caller a fresh token in the same answer.
      */
-    @Transactional
     public User update(Long userId, String name, String email, String currentPassword, String newPassword) {
+        // No transaction here on purpose: the one or two BCrypt rounds below take ~100 ms each, and a pooled
+        // connection must not sit idle under them. The write is one conditional UPDATE, so nothing read here
+        // is written back stale -- a revoke that lands in between keeps its version bump.
         User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
         if (!Passwords.matches(currentPassword, user.getPasswordHash())) {
             throw bad("current password is wrong");
@@ -86,13 +89,13 @@ public class UserService {
         if (!cleanEmail.equals(user.getEmail()) && users.existsByEmail(cleanEmail)) {
             throw bad("that email is already registered");
         }
-        user.setName(cleanName);
-        user.setEmail(cleanEmail);
-        if (newPassword != null && !newPassword.isBlank()) {
-            user.setPasswordHash(Passwords.hash(newPassword));
-            user.setTokenVersion(user.getTokenVersion() + 1);
+        boolean changingPassword = newPassword != null && !newPassword.isBlank();
+        String hash = changingPassword ? Passwords.hash(newPassword) : user.getPasswordHash();
+        if (users.edit(userId, cleanName, cleanEmail, user.getPasswordHash(), hash, changingPassword ? 1 : 0) == 0) {
+            // The password changed under us, so the one we just checked is no longer current.
+            throw bad("current password is wrong");
         }
-        return users.save(user);
+        return users.findById(userId).orElseThrow(() -> bad("user not found"));
     }
 
     /**
@@ -106,7 +109,6 @@ public class UserService {
     // ponytail: no provider/provider-id columns, so a user created this way has no password it can be
     // asked for, and /profile's "current password" gate locks its owner out of editing. A "set a password"
     // flow is the upgrade; linking by verified email is the whole requirement today.
-    @Transactional
     public User findOrCreateFromOAuth(String email, String name) {
         String cleanEmail = cleanEmail(email);
         return users.findByEmail(cleanEmail).orElseGet(() ->
@@ -161,9 +163,10 @@ public class UserService {
      */
     @Transactional
     public int revokeAgentTokens(Long agentId) {
-        AgentTokenVersion version = agentVersions.findById(agentId).orElseGet(() -> new AgentTokenVersion(agentId));
-        version.setVersion(version.getVersion() + 1);
-        return agentVersions.save(version).getVersion();
+        // One upsert rather than read-modify-write: two revokes landing together would otherwise race on the
+        // first insert and answer one of them with a misleading 400, or lose a bump.
+        agentVersions.bump(agentId);
+        return agentVersions.findById(agentId).map(AgentTokenVersion::getVersion).orElse(0);
     }
 
     /** How many users exist. Public: a count gives away nothing about who they are. */
@@ -190,6 +193,11 @@ public class UserService {
             throw bad("an admin cannot take its own admin rights away");
         }
         User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
+        if (user.getRole() != role) {
+            // The role rides inside the token and the other services read it from there, not from this row:
+            // without this a demoted admin keeps writing everyone's wallets until its token expires.
+            user.setTokenVersion(user.getTokenVersion() + 1);
+        }
         user.setRole(role);
         return users.save(user);
     }
@@ -225,8 +233,9 @@ public class UserService {
      */
     public Map<String, Integer> tokenVersions() {
         Map<String, Integer> all = new HashMap<>();
-        users.findByTokenVersionGreaterThan(0).forEach(a -> all.put(String.valueOf(a.getId()), a.getTokenVersion()));
-        agentVersions.findByVersionGreaterThan(0).forEach(v -> all.put("agent:" + v.getAgentId(), v.getVersion()));
+        // Projections, not entities: three services poll this every ten seconds and only the two columns travel.
+        users.findByTokenVersionGreaterThan(0).forEach(a -> all.put(String.valueOf(a.id()), a.tokenVersion()));
+        agentVersions.findByVersionGreaterThan(0).forEach(v -> all.put("agent:" + v.agentId(), v.version()));
         return all;
     }
 

@@ -105,15 +105,40 @@ class JwtVerifierTests {
         }
     }
 
-    private static String token(RSAKey key, String subject, Instant expiry, String role) throws Exception {
+    /**
+     * The defect this guards: the role rides in the token, so a demoted admin's old token would keep its ADMIN
+     * claim here until it expired. auth-service bumps the version on a change of role; this side must honour it.
+     */
+    @Test
+    void aChangeOfRoleKillsTheTokenThatCarriesTheOldOne() throws Exception {
+        RSAKey key = new RSAKeyGenerator(2048).keyID("k").generate();
+        HttpServer auth = publish(Map.of(
+                "/jwks.json", new JWKSet(key.toPublicJWK()).toString(),
+                "/token-versions", "{\"42\":1}"));
+        try {
+            String base = "http://localhost:" + auth.getAddress().getPort();
+            JwtVerifier verifier = new JwtVerifier(base + "/jwks.json", new Revocations(base + "/token-versions"));
+            Instant later = Instant.now().plusSeconds(300);
+
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(key, "42", later, "ADMIN", 0)),
+                    "the token minted before the demotion still says ADMIN, so it must not be accepted at all");
+            Caller demoted = verifier.callerOf("Bearer " + token(key, "42", later, "USER", 1));
+            assertFalse(demoted.writesEveryone(), "the next login carries the role the user has now");
+            assertFalse(demoted.readsEveryone());
+        } finally {
+            auth.stop(0);
+        }
+    }
+
+    static String token(RSAKey key, String subject, Instant expiry, String role) throws Exception {
         return token(key, subject, expiry, role, null);
     }
 
-    private static String token(RSAKey key, String subject, Instant expiry, String role, Integer version) throws Exception {
+    static String token(RSAKey key, String subject, Instant expiry, String role, Integer version) throws Exception {
         return token(key, subject, expiry, role, version, null, null);
     }
 
-    private static String token(RSAKey key, String subject, Instant expiry, String role, Integer version, Long agent, Integer agentVersion) throws Exception {
+    static String token(RSAKey key, String subject, Instant expiry, String role, Integer version, Long agent, Integer agentVersion) throws Exception {
         JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder().subject(subject).expirationTime(Date.from(expiry));
         if (agent != null) {
             claims.claim("agent", agent);
@@ -134,7 +159,7 @@ class JwtVerifierTests {
     }
 
     /** A JSON server on a free port, standing in for auth-service: path to body. */
-    private static HttpServer publish(Map<String, String> bodies) throws IOException {
+    static HttpServer publish(Map<String, String> bodies) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         bodies.forEach((path, json) -> server.createContext(path, exchange -> {
             byte[] body = json.getBytes(StandardCharsets.UTF_8);

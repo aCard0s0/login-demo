@@ -40,8 +40,9 @@ privilege instead of on a crash.
 
 That is the one place this service differs from auth-service: the role is read **from the token's claims**,
 not from a database row. Asking auth-service per request is exactly what the JWKS handoff exists to avoid,
-so the cost is that a promotion or demotion takes effect here when the token is renewed rather than on the
-next request. `auth.token-ttl` (default 30m) is that delay's upper bound.
+so a promotion or demotion only reaches here with a new token. auth-service closes that gap itself: a change
+of role revokes the user's tokens, the same as a suspension, and the revocation feed this service polls says
+so within `Revocations.MAX_AGE` (10s). The user logs in again and the new role arrives in the new token.
 
 ## Permissions
 
