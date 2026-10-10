@@ -139,7 +139,7 @@ services:
       todo-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9083/api/public/agents/stats || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9083/actuator/health || exit 1"]
       interval: 3s
       timeout: 3s
       retries: 20

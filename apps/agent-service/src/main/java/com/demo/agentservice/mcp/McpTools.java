@@ -5,6 +5,7 @@ import com.demo.agentservice.activity.ActivityLog;
 import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.entities.AgentMcpServer;
 import com.demo.agentservice.agent.ServerUrls;
+import com.github.benmanes.caffeine.cache.Ticker;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -13,14 +14,21 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import java.net.Authenticator;
+import java.net.CookieHandler;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Executor;
 
 /**
  * The MCP servers an agent's owner attached, seen through that agent's permissions.
@@ -46,7 +54,7 @@ final class McpTools {
     /** How long a server's listing is reused. A tool the server adds or drops shows up here within this. */
     static final Duration LISTING_TTL = Duration.ofSeconds(15);
 
-    private static final ToolListCache LISTINGS = new ToolListCache(LISTING_TTL, Instant::now);
+    private static final ToolListCache LISTINGS = new ToolListCache(LISTING_TTL, Ticker.systemTicker());
 
     private McpTools() {}
 
@@ -56,24 +64,32 @@ final class McpTools {
      */
     static List<Tool> list(Agent agent, String bearer, ActivityLog activity, ServerUrls urls) {
         Map<String, Tool> offered = new LinkedHashMap<>();
+        Set<String> clashed = new HashSet<>();
         for (AgentMcpServer server : agent.getServers()) {
             try {
+                boolean trusted = urls.trusted(server.getUrl());
                 for (Tool tool : tools(server, bearer, urls)) {
-                    if (server.getAccess().allows(readOnly(server, tool, urls))) {
+                    if (server.getAccess().allows(readOnly(server, tool, trusted))) {
                         Tool mine = renamed(server, tool);
-                        // Two long names cut to the same 64 characters: offer neither as that name, rather than one at random.
+                        // Long names cut to the same 64 characters: offer none of them as that name, rather than one at random.
                         if (offered.putIfAbsent(mine.name(), mine) != null) {
                             log.warn("agent {} server '{}': tool '{}' truncates to '{}' like another; not offered", agent.getId(), server.getName(), tool.name(), mine.name());
-                            offered.remove(mine.name());
+                            clashed.add(mine.name());
                         }
                     }
                 }
             } catch (Exception e) {
                 // Clients list tools often; one line per failure, not one per listing, or the log is nothing else.
-                activity.recordOnce(agent.getId(), Activity.TOOL_CALL,
-                        "server '" + server.getName() + "': could not connect: " + ActivityLog.brief(e.getMessage()));
+                // A line that cannot be written must not hide the servers that did answer.
+                try {
+                    activity.recordOnce(agent.getId(), Activity.TOOL_CALL,
+                            "server '" + server.getName() + "': could not connect: " + ActivityLog.brief(e.getMessage()));
+                } catch (RuntimeException logFailed) {
+                    log.warn("agent {} server '{}': could not record that it is unreachable", agent.getId(), server.getName(), logFailed);
+                }
             }
         }
+        offered.keySet().removeAll(clashed);
         return new ArrayList<>(offered.values());
     }
 
@@ -86,7 +102,7 @@ final class McpTools {
             throw new AccessDenied("ambiguous tool: " + matching.size() + " tools on server '" + server.getName() + "' truncate to " + name);
         }
         Tool tool = matching.stream().findFirst().orElseThrow(() -> new AccessDenied("no such tool: " + name));
-        if (!server.getAccess().allows(readOnly(server, tool, urls))) {
+        if (!server.getAccess().allows(readOnly(server, tool, urls.trusted(server.getUrl())))) {
             throw new AccessDenied("needs WRITE on server '" + server.getName() + "' (has " + server.getAccess() + ")");
         }
         try (McpSyncClient client = connect(server, bearer, urls)) {
@@ -143,9 +159,7 @@ final class McpTools {
         String base = url.getScheme() + "://" + url.getRawAuthority();
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base)
                 .endpoint(endpoint(url))
-                // A public server answering 302 to a private address would be the check above, undone.
-                .customizeClient(client -> client.followRedirects(HttpClient.Redirect.NEVER))
-                .connectTimeout(Duration.ofSeconds(5))
+                .clientBuilder(new SharedHttpClient())
                 .httpRequestCustomizer((request, method, uri, body, context) -> {
                     if (auth != null) {
                         request.header("Authorization", auth);
@@ -165,6 +179,33 @@ final class McpTools {
         return client;
     }
 
+    /**
+     * One JDK client for every downstream connection. The SDK builds a client per transport and never closes it, so
+     * each would keep a selector thread and connection pool alive until the collector found it; this builder hands
+     * the SDK the same client every time and ignores what it tries to set on it, which is only the connect timeout.
+     */
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            // The SDK's own default: HTTP/2 would send an h2c upgrade on every plain-http POST, which some servers mishandle.
+            .version(HttpClient.Version.HTTP_1_1)
+            // A public server answering 302 to a private address would be the URL check, undone.
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
+
+    private static final class SharedHttpClient implements HttpClient.Builder {
+        public HttpClient build() { return HTTP; }
+        public HttpClient.Builder cookieHandler(CookieHandler h) { return this; }
+        public HttpClient.Builder connectTimeout(Duration d) { return this; }
+        public HttpClient.Builder sslContext(SSLContext c) { return this; }
+        public HttpClient.Builder sslParameters(SSLParameters p) { return this; }
+        public HttpClient.Builder executor(Executor e) { return this; }
+        public HttpClient.Builder followRedirects(HttpClient.Redirect r) { return this; }
+        public HttpClient.Builder version(HttpClient.Version v) { return this; }
+        public HttpClient.Builder priority(int p) { return this; }
+        public HttpClient.Builder proxy(ProxySelector s) { return this; }
+        public HttpClient.Builder authenticator(Authenticator a) { return this; }
+    }
+
     /** Path and query of the stored URL, as the SDK's endpoint: {@code /mcp?agent=5} must keep its {@code ?agent=5}. */
     static String endpoint(URI url) {
         String path = url.getRawPath() == null || url.getRawPath().isEmpty() ? "/" : url.getRawPath();
@@ -175,8 +216,8 @@ final class McpTools {
      * The one rule READ keys on. A trusted server's own annotation counts, and a tool that does not say it is
      * read-only is taken to write; for any other server only the owner's list counts, and the annotation is ignored.
      */
-    static boolean readOnly(AgentMcpServer server, Tool tool, ServerUrls urls) {
-        if (urls.trusted(server.getUrl())) {
+    static boolean readOnly(AgentMcpServer server, Tool tool, boolean trusted) {
+        if (trusted) {
             return tool.annotations() != null && Boolean.TRUE.equals(tool.annotations().readOnlyHint());
         }
         return server.readOnlyToolSet().contains(tool.name());

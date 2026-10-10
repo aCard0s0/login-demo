@@ -18,7 +18,31 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <!-- ErrorBodyAdvice: the {error} body every service answers a rejection with. -->
+        <!-- The DTOs carry their own limits; the service checks them before anything reaches the database. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!-- /actuator/health for the compose healthcheck; nothing else is exposed. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- The schema, as versioned SQL under db/migration; Hibernate only validates it. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <!-- ToolListCache: a downstream server's listing, kept 15s, bounded, least recently used out first. -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+        <!-- ErrorBodyAdvice and Bad.request: the {error} body every service answers a rejection with. -->
         <dependency>
             <groupId>com.demo</groupId>
             <artifactId>web-errors</artifactId>
@@ -36,15 +60,50 @@
             <artifactId>mcp-server</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- UrlPolicy: where an owner's MCP server may point. ServerUrls feeds it the two trusted-URL properties. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>outbound-urls</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- EncryptedText: the stored authorization header, AES-256-GCM at rest, plain to the code. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>jpa-crypto</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- MCP both ways: the server an external agent connects to, and the client that reaches the servers its
              owner attached. Version from the root BOM. -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
             <artifactId>mcp</artifactId>
         </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- PostgresIntegrationTests: the migrations and the queries against the real database, in a throwaway container. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- ArchitectureTests: the package rules in the README, enforced. -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

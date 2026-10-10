@@ -177,17 +177,26 @@ public class AgentMcpEndpoint {
             String what = in.name() + " " + args;
             AgentTools builtins = new AgentTools(s.caller(), s.agent(), agents, activity);
             ToolResult result;
+            String kind = Activity.TOOL_CALL;
+            String line;
             try {
                 result = builtins.has(in.name()) ? builtins.call(in.name(), args) : McpTools.call(s.agent(), s.bearer(), in.name(), args, urls);
-                activity.record(s.agent().getId(), Activity.TOOL_CALL,
-                        what + (result.error() ? " -> error: " : " -> ok: ") + ActivityLog.brief(result.summary()));
+                line = what + (result.error() ? " -> error: " : " -> ok: ") + ActivityLog.brief(result.summary());
             } catch (AccessDenied denied) {
-                activity.record(s.agent().getId(), Activity.TOOL_DENIED, in.name() + ": " + denied.getMessage());
+                kind = Activity.TOOL_DENIED;
+                line = in.name() + ": " + denied.getMessage();
                 result = ToolResult.error("denied: " + denied.getMessage());
             } catch (RuntimeException e) {
                 // The owner's log gets the detail; the model gets a flat message, not our hostnames and stack.
-                activity.record(s.agent().getId(), Activity.TOOL_CALL, what + " -> error: " + ActivityLog.brief(e.getMessage()));
+                line = what + " -> error: " + ActivityLog.brief(e.getMessage());
                 result = ToolResult.error("error: the tool call failed; the agent's activity log has the detail");
+            }
+            // The tool has run by now. A log line that cannot be written must not turn a write that happened into a
+            // failure the model retries; it goes to the server log instead -- without the arguments, which can carry secrets.
+            try {
+                activity.record(s.agent().getId(), kind, line);
+            } catch (RuntimeException e) {
+                log.warn("agent {}: could not record a {} line for tool '{}'", s.agent().getId(), kind, in.name(), e);
             }
             CallToolResult.Builder out = CallToolResult.builder()
                     .content(result.content().isEmpty() ? List.of(new TextContent("(empty)")) : result.content())

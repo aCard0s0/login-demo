@@ -4,11 +4,10 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -16,8 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ToolListCacheTests {
 
-    final AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-01-01T00:00:00Z"));
-    final ToolListCache cache = new ToolListCache(Duration.ofSeconds(15), now::get);
+    final AtomicLong nanos = new AtomicLong();
+    final ToolListCache cache = new ToolListCache(Duration.ofSeconds(15), nanos::get);
     final AtomicInteger loads = new AtomicInteger();
 
     private List<Tool> load(String url, String credential) {
@@ -35,7 +34,7 @@ class ToolListCacheTests {
         assertEquals("t3", load("http://b/mcp", "Bearer x").get(0).name(), "another server too");
         assertEquals(3, loads.get());
 
-        now.set(now.get().plusSeconds(16));
+        nanos.addAndGet(Duration.ofSeconds(16).toNanos());
         assertEquals("t4", load("http://a/mcp", "Bearer x").get(0).name(), "past the TTL it is listed again");
 
         AtomicInteger failed = new AtomicInteger();

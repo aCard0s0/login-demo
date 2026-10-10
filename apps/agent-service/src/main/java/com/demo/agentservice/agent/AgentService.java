@@ -9,6 +9,9 @@ import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.entities.AgentMcpServer;
 import com.demo.agentservice.agent.entities.AgentRepository;
 import com.demo.auth.client.Caller;
+import com.demo.web.errors.Bad;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -16,9 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -28,30 +31,31 @@ import java.util.stream.Collectors;
  *
  * <p>Every change is written to the agent's activity log, prefixed with who made it when it was not the owner
  * at the keyboard but one of their agents.
+ *
+ * <p>The limits on what comes in -- name required, column widths, the server-name alphabet -- are the
+ * annotations on the DTOs, checked here and not at the controller, so the tools one agent uses on another
+ * are held to the same rule as the page. A violation is a 400 with the annotation's own sentence.
  */
 @Service
 public class AgentService {
 
-    static final Pattern SERVER_NAME = Pattern.compile("^[a-z0-9_-]{1,20}$");
     static final String TODO_SERVER = "todos";
 
-    /** Column widths, checked here so Postgres does not answer an overflow with a 500. */
-    static final int MAX_NAME = 100;
-    static final int MAX_INSTRUCTIONS = 8000;
-    static final int MAX_URL = 255;
-    /** Plain text. Encrypted it grows to 3 + 4/3 * (12 + this + 16) characters, which must fit the 2000-wide column. */
-    static final int MAX_AUTH_HEADER = 1400;
+    /** The joined, comma-separated column. */
     static final int MAX_READ_ONLY_TOOLS = 2000;
 
     private final AgentRepository agents;
     private final ActivityLog activity;
     private final ServerUrls urls;
+    private final Validator validator;
     private final String todoMcpUrl;
 
-    public AgentService(AgentRepository agents, ActivityLog activity, ServerUrls urls, @Value("${agents.todo-mcp-url:}") String todoMcpUrl) {
+    public AgentService(AgentRepository agents, ActivityLog activity, ServerUrls urls, Validator validator,
+                        @Value("${agents.todo-mcp-url:}") String todoMcpUrl) {
         this.agents = agents;
         this.activity = activity;
         this.urls = urls;
+        this.validator = validator;
         this.todoMcpUrl = todoMcpUrl == null ? "" : todoMcpUrl.strip();
     }
 
@@ -73,7 +77,8 @@ public class AgentService {
     /** A new agent, starting with the built-in todo server as READ when the deployment has one. */
     @Transactional
     public Agent create(Caller caller, NewAgent in) {
-        Agent agent = new Agent(caller.userId(), cleanName(in.name()), cleanInstructions(in.instructions()),
+        valid(in);
+        Agent agent = new Agent(caller.userId(), in.name().strip(), strip(in.instructions()),
                 in.othersAccess() == null ? OthersAccess.NONE : in.othersAccess());
         if (!todoMcpUrl.isEmpty()) {
             agent.getServers().add(new AgentMcpServer(agent, TODO_SERVER, todoMcpUrl, null, true, Access.READ));
@@ -87,15 +92,15 @@ public class AgentService {
     /** Edits an agent. A null field means "leave it alone". {@code by} names the actor when it is not the owner. */
     @Transactional
     public Agent update(Caller caller, Long id, UpdateAgent in, String by) {
+        valid(in);
         Agent agent = get(caller, id);
         List<String> changes = new ArrayList<>();
         if (in.name() != null && !in.name().strip().equals(agent.getName())) {
-            String name = cleanName(in.name());
-            changes.add("name '" + agent.getName() + "' -> '" + name + "'");
-            agent.setName(name);
+            changes.add("name '" + agent.getName() + "' -> '" + in.name().strip() + "'");
+            agent.setName(in.name().strip());
         }
         if (in.instructions() != null && !in.instructions().strip().equals(agent.getInstructions())) {
-            agent.setInstructions(cleanInstructions(in.instructions()));
+            agent.setInstructions(in.instructions().strip());
             changes.add("instructions edited");
         }
         if (in.othersAccess() != null && in.othersAccess() != agent.getOthersAccess()) {
@@ -113,15 +118,13 @@ public class AgentService {
 
     @Transactional
     public AgentMcpServer addServer(Caller caller, Long id, NewMcpServer in, String by) {
+        valid(in);
         Agent agent = get(caller, id);
-        String name = cleanServerName(agent, in.name());
-        if (in.access() == null) {
-            throw bad("access must be READ or WRITE");
-        }
-        String url = cleanUrl(in.url());
+        String name = uniqueServerName(agent, in.name());
+        String url = urls.clean(in.url());
         boolean forward = Boolean.TRUE.equals(in.forwardCallerToken());
         checkForward(forward, url);
-        AgentMcpServer server = new AgentMcpServer(agent, name, url, cleanAuthHeader(in.authHeader()), forward, in.access());
+        AgentMcpServer server = new AgentMcpServer(agent, name, url, blankToNull(in.authHeader()), forward, in.access());
         server.setReadOnlyTools(cleanTools(in.readOnlyTools()));
         agent.getServers().add(server);
         // save() merges, so the row with an id is the one on the saved copy, not the one built above.
@@ -131,20 +134,21 @@ public class AgentService {
 
     @Transactional
     public AgentMcpServer updateServer(Caller caller, Long id, Long serverId, UpdateMcpServer in, String by) {
+        valid(in);
         Agent agent = get(caller, id);
         AgentMcpServer server = server(agent, serverId);
         List<String> changes = new ArrayList<>();
         String was = server.getName();
         if (in.name() != null && !in.name().strip().equals(was)) {
-            server.setName(cleanServerName(agent, in.name()));
+            server.setName(uniqueServerName(agent, in.name()));
             changes.add("server '" + was + "' renamed '" + server.getName() + "'");
         }
         if (in.url() != null && !in.url().strip().equals(server.getUrl())) {
-            server.setUrl(cleanUrl(in.url()));
+            server.setUrl(urls.clean(in.url()));
             changes.add("server '" + server.getName() + "' url changed");
         }
         if (in.authHeader() != null) {
-            String header = cleanAuthHeader(in.authHeader());
+            String header = blankToNull(in.authHeader());
             changes.add("server '" + server.getName() + "' auth header " + (header == null ? "cleared" : "set"));
             server.setAuthHeader(header);
         }
@@ -190,6 +194,15 @@ public class AgentService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "no such server"));
     }
 
+    /** The DTO's own annotations, as a 400 with one violation's sentence: the first by field name, so the same body always gets the same answer. */
+    private <T> void valid(T in) {
+        validator.validate(in).stream()
+                .min(Comparator.comparing((ConstraintViolation<T> v) -> v.getPropertyPath().toString()).thenComparing(ConstraintViolation::getMessage))
+                .ifPresent(v -> {
+                    throw Bad.request(v.getMessage());
+                });
+    }
+
     /**
      * The caller's token is the owner's whole authority -- every service accepts it -- so it goes only to the
      * deployment's own servers, never to a URL an owner typed in, however much the owner trusts it. A server that
@@ -197,54 +210,20 @@ public class AgentService {
      */
     private void checkForward(boolean forward, String url) {
         if (forward && !urls.trusted(url)) {
-            throw bad("the caller's token is only forwarded to the deployment's own servers; use an authorization header instead");
+            throw Bad.request("the caller's token is only forwarded to the deployment's own servers; use an authorization header instead");
         }
     }
 
-    private String cleanUrl(String url) {
-        String clean = urls.clean(url);
-        if (clean.length() > MAX_URL) {
-            throw bad("url must be at most " + MAX_URL + " characters");
+    /** Unique within the agent, because it becomes the prefix of every tool name the model sees. The alphabet is the DTO's rule. */
+    private static String uniqueServerName(Agent agent, String name) {
+        if (agent.getServers().stream().anyMatch(s -> s.getName().equals(name))) {
+            throw Bad.request("server name already used by this agent");
         }
-        return clean;
+        return name;
     }
 
-    private static String cleanName(String name) {
-        if (name == null || name.isBlank()) {
-            throw bad("name is required");
-        }
-        if (name.strip().length() > MAX_NAME) {
-            throw bad("name must be at most " + MAX_NAME + " characters");
-        }
-        return name.strip();
-    }
-
-    private static String cleanInstructions(String instructions) {
-        String clean = instructions == null ? "" : instructions.strip();
-        if (clean.length() > MAX_INSTRUCTIONS) {
-            throw bad("instructions must be at most " + MAX_INSTRUCTIONS + " characters");
-        }
-        return clean;
-    }
-
-    private static String cleanAuthHeader(String header) {
-        String clean = blankToNull(header);
-        if (clean != null && clean.length() > MAX_AUTH_HEADER) {
-            throw bad("authHeader must be at most " + MAX_AUTH_HEADER + " characters");
-        }
-        return clean;
-    }
-
-    /** Short and lower-case, because it becomes the prefix of every tool name the model sees; unique within the agent. */
-    private static String cleanServerName(Agent agent, String name) {
-        String clean = name == null ? "" : name.strip();
-        if (!SERVER_NAME.matcher(clean).matches()) {
-            throw bad("server name must be 1-20 of a-z, 0-9, _ or -");
-        }
-        if (agent.getServers().stream().anyMatch(s -> s.getName().equals(clean))) {
-            throw bad("server name already used by this agent");
-        }
-        return clean;
+    private static String strip(String s) {
+        return s == null ? "" : s.strip();
     }
 
     private static String blankToNull(String s) {
@@ -259,12 +238,8 @@ public class AgentService {
         String clean = tools.stream().filter(Objects::nonNull).map(String::strip).filter(s -> !s.isEmpty())
                 .distinct().sorted().collect(Collectors.joining(","));
         if (clean.length() > MAX_READ_ONLY_TOOLS) {
-            throw bad("too many read-only tools");
+            throw Bad.request("too many read-only tools");
         }
         return clean.isEmpty() ? null : clean;
-    }
-
-    private static ResponseStatusException bad(String why) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, why);
     }
 }

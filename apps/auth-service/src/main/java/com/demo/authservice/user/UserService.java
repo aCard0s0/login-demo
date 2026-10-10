@@ -1,6 +1,7 @@
 package com.demo.authservice.user;
 
 import com.demo.authservice.support.AttemptWindow;
+import com.demo.web.errors.Bad;
 import com.demo.authservice.support.Passwords;
 import com.demo.authservice.token.Tokens;
 import com.demo.authservice.user.entities.AgentTokenVersion;
@@ -63,7 +64,7 @@ public class UserService {
         String hash = Passwords.hash(password);
         // Racing registrations both get past this; the unique index on users.email is what actually decides.
         if (users.existsByEmail(cleanEmail)) {
-            throw bad("that email is already registered");
+            throw Bad.request("that email is already registered");
         }
         return users.save(new User(cleanName, cleanEmail, hash));
     }
@@ -80,22 +81,22 @@ public class UserService {
         // No transaction here on purpose: the one or two BCrypt rounds below take ~100 ms each, and a pooled
         // connection must not sit idle under them. The write is one conditional UPDATE, so nothing read here
         // is written back stale -- a revoke that lands in between keeps its version bump.
-        User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
+        User user = users.findById(userId).orElseThrow(() -> Bad.request("user not found"));
         if (!Passwords.matches(currentPassword, user.getPasswordHash())) {
-            throw bad("current password is wrong");
+            throw Bad.request("current password is wrong");
         }
         String cleanName = cleanName(name);
         String cleanEmail = cleanEmail(email);
         if (!cleanEmail.equals(user.getEmail()) && users.existsByEmail(cleanEmail)) {
-            throw bad("that email is already registered");
+            throw Bad.request("that email is already registered");
         }
         boolean changingPassword = newPassword != null && !newPassword.isBlank();
         String hash = changingPassword ? Passwords.hash(newPassword) : user.getPasswordHash();
         if (users.edit(userId, cleanName, cleanEmail, user.getPasswordHash(), hash, changingPassword ? 1 : 0) == 0) {
             // The password changed under us, so the one we just checked is no longer current.
-            throw bad("current password is wrong");
+            throw Bad.request("current password is wrong");
         }
-        return users.findById(userId).orElseThrow(() -> bad("user not found"));
+        return users.findById(userId).orElseThrow(() -> Bad.request("user not found"));
     }
 
     /**
@@ -149,7 +150,7 @@ public class UserService {
      */
     public String issueAgentToken(Long userId, Long agentId) {
         if (agentId == null) {
-            throw bad("agentId is required");
+            throw Bad.request("agentId is required");
         }
         User user = users.findById(userId == null ? -1 : userId).filter(a -> !a.isSuspended())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "user not found"));
@@ -187,12 +188,12 @@ public class UserService {
     @Transactional
     public User changeRole(User admin, Long userId, Role role) {
         if (role == null) {
-            throw bad("a role is required");
+            throw Bad.request("a role is required");
         }
         if (admin.getId().equals(userId) && role != Role.ADMIN) {
-            throw bad("an admin cannot take its own admin rights away");
+            throw Bad.request("an admin cannot take its own admin rights away");
         }
-        User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
+        User user = users.findById(userId).orElseThrow(() -> Bad.request("user not found"));
         if (user.getRole() != role) {
             // The role rides inside the token and the other services read it from there, not from this row:
             // without this a demoted admin keeps writing everyone's wallets until its token expires.
@@ -209,9 +210,9 @@ public class UserService {
     @Transactional
     public User setSuspended(User admin, Long userId, boolean suspended) {
         if (admin.getId().equals(userId) && suspended) {
-            throw bad("an admin cannot suspend itself");
+            throw Bad.request("an admin cannot suspend itself");
         }
-        User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
+        User user = users.findById(userId).orElseThrow(() -> Bad.request("user not found"));
         if (suspended && !user.isSuspended()) {
             user.setTokenVersion(user.getTokenVersion() + 1);
         }
@@ -222,7 +223,7 @@ public class UserService {
     /** Signs a user out everywhere: every token it holds stops working. It can log straight back in. */
     @Transactional
     public User revokeTokens(Long userId) {
-        User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
+        User user = users.findById(userId).orElseThrow(() -> Bad.request("user not found"));
         user.setTokenVersion(user.getTokenVersion() + 1);
         return users.save(user);
     }
@@ -271,10 +272,10 @@ public class UserService {
     private static String cleanName(String name) {
         String clean = name == null ? "" : name.strip();
         if (clean.isEmpty()) {
-            throw bad("name is required");
+            throw Bad.request("name is required");
         }
         if (clean.length() > MAX_COLUMN_LENGTH) {
-            throw bad("name must be at most " + MAX_COLUMN_LENGTH + " characters");
+            throw Bad.request("name must be at most " + MAX_COLUMN_LENGTH + " characters");
         }
         return clean;
     }
@@ -282,12 +283,9 @@ public class UserService {
     private static String cleanEmail(String email) {
         String clean = email == null ? "" : email.strip().toLowerCase();
         if (clean.length() > MAX_COLUMN_LENGTH || !clean.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) {
-            throw bad("a valid email is required");
+            throw Bad.request("a valid email is required");
         }
         return clean;
     }
 
-    private static ResponseStatusException bad(String why) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, why);
-    }
 }

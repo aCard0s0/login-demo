@@ -31,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:sqlite:target/contract-test.db",
         "spring.jpa.hibernate.ddl-auto=create-drop",
+        "spring.flyway.enabled=false",
         "spring.datasource.hikari.maximum-pool-size=1",
 })
 @AutoConfigureMockMvc
@@ -85,6 +86,37 @@ class ApiContractTests {
         mvc.perform(get("/api/agents/" + hers + "/activity").header("Authorization", "Bearer one")).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].detail").value("agent tokens revoked"));
         mvc.perform(get("/api/public/agents/stats")).andExpect(status().isOk()).andExpect(jsonPath("$.agents").isNumber());
+        // The compose healthcheck, outside /api so the proxy never forwards it, and with no detail to anyone.
+        mvc.perform(get("/actuator/health")).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("UP"))
+                .andExpect(jsonPath("$.components").doesNotExist());
+    }
+
+    /** The limits are the DTO annotations, and a violation reads as the annotation's own sentence in the {error} body. */
+    @Test
+    void aBodyOutsideTheLimitsIs400WithTheRuleItBroke() throws Exception {
+        when(jwt.callerOf("Bearer four")).thenReturn(new Caller("4", "USER"));
+        mvc.perform(post("/api/agents").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"   \"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("name is required"));
+        mvc.perform(post("/api/agents").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"" + "x".repeat(101) + "\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("name must be at most 100 characters"));
+        Long mine = agents.create(new Caller("4", "USER"), new NewAgent("mine", "", null)).getId();
+        mvc.perform(post("/api/agents/" + mine + "/servers").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Has Spaces\",\"url\":\"http://mcp.example/\",\"access\":\"READ\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("server name must be 1-20 of a-z, 0-9, _ or -"));
+        mvc.perform(post("/api/agents/" + mine + "/servers").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"ok\",\"url\":\"http://mcp.example/\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("access must be READ or WRITE"));
+        mvc.perform(post("/api/agents/" + mine + "/servers").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"h\",\"url\":\"http://mcp.example/\",\"access\":\"READ\",\"authHeader\":\"Bearer é\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("authHeader must be printable ASCII"));
+        mvc.perform(get("/api/agents/" + mine).header("Authorization", "Bearer four")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.servers.length()").value(1));   // none of the refused rows stuck
+        // Checked as stored, stripped: padding is not a violation.
+        mvc.perform(post("/api/agents/" + mine + "/servers").header("Authorization", "Bearer four").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\" padded \",\"url\":\" http://localhost:9084/mcp \",\"access\":\"READ\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("padded"));
     }
 
     /** The token an agent connects with opens /mcp and nothing else: here it could widen its own access or mint more tokens. */

@@ -15,6 +15,8 @@ docker/initdb.sql       one database and one role per service
 libs/auth-client        verifying those tokens: the one copy the three services below share
 libs/web-errors         the {error} body every service answers a rejection with
 libs/mcp-server         the stateless /mcp endpoint and tool-argument parsing
+libs/outbound-urls      which URLs a service may be pointed at by a user: public addresses only, the deployment's own by name
+libs/jpa-crypto         a text column encrypted at rest, as a JPA converter, and the migration that catches up old rows
 libs/auth-provider      sign-in with a provider: the flow in core/, one jar per provider (google, github, microsoft, apple, x, linkedin, discord)
 apps/auth-service       users, login, OAuth, roles, tokens       :9081
 apps/todo-service       per-user todos, and their MCP server     :9082
@@ -35,6 +37,8 @@ Each service documents itself:
 | auth-client | `JwtVerifier`, `Revocations` and `Caller`: a plain jar, no service, that todo-, agent- and wallet-service depend on | [libs/auth-client](libs/auth-client/README.md) |
 | web-errors | `ErrorBodyAdvice`: every rejection, MVC's own included, as `{"error": "..."}`; all four services extend it | [libs/web-errors](libs/web-errors/README.md) |
 | mcp-server | `McpEndpoint` and `Args`: the `/mcp` servlet todo- and wallet-service serve their tools through, and exact argument parsing agent-service shares too | [libs/mcp-server](libs/mcp-server/README.md) |
+| outbound-urls | `UrlPolicy`: a user-supplied URL may name one of the deployment's own servers or resolve only to public addresses, checked on save and again before every connection; agent-service's `ServerUrls` | [libs/outbound-urls](libs/outbound-urls/README.md) |
+| jpa-crypto | `EncryptedText`, an `AttributeConverter` that keeps one column AES-256-GCM at rest, and `EncryptedColumnMigration` for rows written before it; agent-service's stored authorization headers | [libs/jpa-crypto](libs/jpa-crypto/README.md) |
 | auth-provider | `OAuthFlow` and `OAuthProvider` in `core`, one jar per provider (Google, GitHub, Microsoft, Apple, X, LinkedIn, Discord): the authorization-code flow with PKCE, which auth-service's `OAuthController` drives | [libs/auth-provider](libs/auth-provider/README.md) |
 
 ## Glossary
