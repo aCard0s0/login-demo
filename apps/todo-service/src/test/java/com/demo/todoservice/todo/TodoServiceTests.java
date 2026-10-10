@@ -1,6 +1,7 @@
 package com.demo.todoservice.todo;
 
 import com.demo.auth.client.Caller;
+import com.demo.todoservice.todo.entities.Todo;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

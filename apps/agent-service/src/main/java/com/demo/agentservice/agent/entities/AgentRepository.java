@@ -1,6 +1,5 @@
-package com.demo.agentservice.agent;
+package com.demo.agentservice.agent.entities;
 
-import com.demo.agentservice.agent.entities.Agent;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

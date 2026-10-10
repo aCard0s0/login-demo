@@ -3,7 +3,7 @@ package com.demo.todoservice.mcp;
 import com.demo.auth.client.Caller;
 import com.demo.auth.client.JwtVerifier;
 import com.demo.mcp.server.McpEndpoint;
-import com.demo.todoservice.todo.Todo;
+import com.demo.todoservice.todo.entities.Todo;
 import com.demo.todoservice.todo.TodoService;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport;

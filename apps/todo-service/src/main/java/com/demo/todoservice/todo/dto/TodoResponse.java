@@ -1,4 +1,6 @@
-package com.demo.todoservice.todo;
+package com.demo.todoservice.todo.dto;
+
+import com.demo.todoservice.todo.entities.Todo;
 
 /**
  * One todo as the frontend sees it. The owner is included because a role that reads everyone gets a list it

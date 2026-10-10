@@ -1,6 +1,9 @@
 package com.demo.todoservice.todo;
 
 import com.demo.auth.client.Caller;
+import com.demo.todoservice.todo.dto.NewTodo;
+import com.demo.todoservice.todo.dto.TodoResponse;
+import com.demo.todoservice.todo.dto.UpdateTodo;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;

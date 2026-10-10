@@ -1,6 +1,6 @@
-package com.demo.accountservice.account;
+package com.demo.accountservice.account.entities;
 
-import com.demo.accountservice.account.entities.Account;
+import com.demo.accountservice.account.AccountService;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;

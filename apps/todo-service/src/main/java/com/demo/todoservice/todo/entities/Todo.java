@@ -1,4 +1,4 @@
-package com.demo.todoservice.todo;
+package com.demo.todoservice.todo.entities;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

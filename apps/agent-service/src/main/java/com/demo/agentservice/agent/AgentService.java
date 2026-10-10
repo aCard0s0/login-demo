@@ -5,6 +5,7 @@ import com.demo.agentservice.activity.ActivityLog;
 import com.demo.agentservice.agent.dto.*;
 import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.entities.AgentMcpServer;
+import com.demo.agentservice.agent.entities.AgentRepository;
 import com.demo.auth.client.Caller;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;

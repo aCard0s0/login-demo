@@ -1,5 +1,6 @@
-package com.demo.todoservice.todo;
+package com.demo.todoservice.todo.entities;
 
+import com.demo.todoservice.todo.TodoService;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

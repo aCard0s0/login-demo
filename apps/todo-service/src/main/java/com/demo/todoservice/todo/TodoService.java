@@ -1,6 +1,8 @@
 package com.demo.todoservice.todo;
 
 import com.demo.auth.client.Caller;
+import com.demo.todoservice.todo.entities.Todo;
+import com.demo.todoservice.todo.entities.TodoRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
