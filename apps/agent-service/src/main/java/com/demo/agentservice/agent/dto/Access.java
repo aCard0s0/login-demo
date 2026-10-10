@@ -1,4 +1,4 @@
-package com.demo.agentservice.agent;
+package com.demo.agentservice.agent.dto;
 
 /**
  * What an agent may do through one MCP server. READ offers and allows only the tools the server itself

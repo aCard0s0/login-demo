@@ -2,8 +2,8 @@ package com.demo.agentservice.mcp;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.agent.Agent;
-import com.demo.agentservice.agent.AgentMcpServer;
+import com.demo.agentservice.agent.entities.Agent;
+import com.demo.agentservice.agent.entities.AgentMcpServer;
 import com.demo.agentservice.agent.ServerUrls;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;

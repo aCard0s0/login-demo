@@ -3,6 +3,8 @@ package com.demo.agentservice.agent;
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
 import com.demo.agentservice.activity.ActivityResponse;
+import com.demo.agentservice.agent.dto.*;
+import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.token.AgentTokens;
 import com.demo.token.Caller;
 import com.demo.token.JwtVerifier;

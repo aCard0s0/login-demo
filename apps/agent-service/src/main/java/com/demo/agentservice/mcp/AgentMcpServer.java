@@ -2,7 +2,7 @@ package com.demo.agentservice.mcp;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.agent.Agent;
+import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.AgentService;
 import com.demo.agentservice.agent.ServerUrls;
 import com.demo.token.Caller;

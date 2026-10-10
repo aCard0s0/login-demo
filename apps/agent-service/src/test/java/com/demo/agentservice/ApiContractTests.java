@@ -1,7 +1,7 @@
 package com.demo.agentservice;
 
 import com.demo.agentservice.agent.AgentService;
-import com.demo.agentservice.agent.NewAgent;
+import com.demo.agentservice.agent.dto.NewAgent;
 import com.demo.agentservice.token.AgentTokens;
 import com.demo.token.Caller;
 import com.demo.token.JwtVerifier;

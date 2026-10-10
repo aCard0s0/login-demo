@@ -1,5 +1,7 @@
-package com.demo.agentservice.agent;
+package com.demo.agentservice.agent.entities;
 
+import com.demo.agentservice.agent.AuthHeaderCrypto;
+import com.demo.agentservice.agent.dto.Access;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;

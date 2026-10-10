@@ -1,4 +1,4 @@
-package com.demo.agentservice.agent;
+package com.demo.agentservice.agent.dto;
 
 import java.util.List;
 

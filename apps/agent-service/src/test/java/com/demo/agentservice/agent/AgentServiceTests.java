@@ -2,6 +2,9 @@ package com.demo.agentservice.agent;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
+import com.demo.agentservice.agent.dto.*;
+import com.demo.agentservice.agent.entities.Agent;
+import com.demo.agentservice.agent.entities.AgentMcpServer;
 import com.demo.token.Caller;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
