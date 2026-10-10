@@ -35,6 +35,20 @@ Each service documents itself:
 | web-errors | `ErrorBodyAdvice`: every rejection, MVC's own included, as `{"error": "..."}`; all four services extend it | [libs/web-errors](libs/web-errors/README.md) |
 | mcp-server | `McpEndpoint` and `Args`: the `/mcp` servlet todo- and wallet-service serve their tools through, and exact argument parsing agent-service shares too | [libs/mcp-server](libs/mcp-server/README.md) |
 
+## Glossary
+
+One word per concept, the same word in classes, tables, URLs and pages. "Account" is none of them:
+`./login-demo test` refuses an `Account` or `accountId` identifier.
+
+| Concept | Name | Lives in |
+|---|---|---|
+| Someone who logs in, with role `ADMIN`, `MODERATOR` or `USER` | **User** | auth-service |
+| An MCP server a user owns, connected to with a token pinned to it | **Agent** | agent-service |
+| Money a user holds, optionally opened for one of their agents | **Wallet** | wallet-service |
+| An agent's READ or WRITE right on a wallet it does not own | **Grant** | wallet-service |
+| An agent's READ or WRITE on one of its MCP servers | **Access** | agent-service |
+| One movement of money, deposits included | **Transfer** | wallet-service |
+
 ## Package convention
 
 The services are split by what the code is *about*, not by which layer it sits in. A package holds one

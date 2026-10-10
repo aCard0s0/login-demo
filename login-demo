@@ -180,6 +180,10 @@ cmd_test() {
     esac
     shift
   done
+  # "Account" once meant a user in one service and money in another; the glossary in README.md names both.
+  if grep -rnE '\bAccount|accountId' --include='*.java' apps libs; then
+    die "'account' is not a domain word here: say User or Wallet (see the glossary in README.md)" 1
+  fi
   require_java
   step "running tests${module:+ for ${module#:}}"
   if [ -n "$module" ]; then run ./mvnw -pl "$module" test; else run ./mvnw test; fi
