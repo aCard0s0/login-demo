@@ -13,9 +13,9 @@ import java.time.Duration;
 import java.util.Map;
 
 /**
- * Asks auth-service for the long-lived token an external agent connects with. Only auth-service holds the
- * signing key, so the token is minted there and merely passed through here -- after {@code AgentService} has
- * checked that the caller owns the agent it is for.
+ * Asks auth-service for the long-lived token an external agent connects with, and to revoke every token minted
+ * for one agent. Only auth-service holds the signing key and the token versions, so both happen there and are
+ * merely passed through here -- after {@code AgentService} has checked that the caller owns the agent.
  */
 @Component
 public class AgentTokens {
@@ -48,6 +48,15 @@ public class AgentTokens {
             return token;
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "auth-service did not issue a token: " + e.getMessage());
+        }
+    }
+
+    /** Kills every token issued for this one agent. The other services see it on their next poll of the feed, within ten seconds. */
+    public void revoke(Long agentId) {
+        try {
+            http.post().uri(uri + "/" + agentId + "/revoke").header("X-Internal-Secret", secret).retrieve().toBodilessEntity();
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "auth-service did not revoke the tokens: " + e.getMessage());
         }
     }
 }

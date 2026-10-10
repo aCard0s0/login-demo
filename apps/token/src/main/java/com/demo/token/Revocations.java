@@ -18,7 +18,8 @@ import java.util.Map;
  * only at auth-service. Tokens are checked in process, so without this a revoked one would keep working
  * against the service until it expired.
  *
- * <p>auth-service publishes, per account it has ever revoked, the token version a token must carry to count.
+ * <p>auth-service publishes, per account it has ever revoked, the token version a token must carry to count --
+ * and per agent whose tokens an owner has revoked alone, keyed {@code agent:<id>} so the two cannot collide.
  * The list is cached and re-read at most every few seconds, so a revocation bites here within that window
  * rather than on the next request.
  */
@@ -54,6 +55,14 @@ public class Revocations {
             refresh();
         }
         return versions.getOrDefault(accountId, 0);
+    }
+
+    /** The lowest {@code agentVer} this agent's own tokens must carry. Zero for an agent never revoked. */
+    public int minimumAgentVersion(Long agentId) {
+        if (stale()) {
+            refresh();
+        }
+        return versions.getOrDefault("agent:" + agentId, 0);
     }
 
     private boolean stale() {

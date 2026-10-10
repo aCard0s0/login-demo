@@ -18,6 +18,8 @@ import org.springframework.web.server.ResponseStatusException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -73,6 +75,13 @@ class ApiContractTests {
         mvc.perform(get("/api/agents/" + hers + "/activity").header("Authorization", "Bearer one")).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].kind").value("config_changed"))
                 .andExpect(jsonPath("$[0].detail").value("agent token issued"));
+        // Revoking is the owner's alone too, goes to auth-service for this one agent, and is in the log.
+        mvc.perform(post("/api/agents/" + hers + "/token/revoke").header("Authorization", "Bearer two")).andExpect(status().isNotFound());
+        verify(tokens, never()).revoke(any());
+        mvc.perform(post("/api/agents/" + hers + "/token/revoke").header("Authorization", "Bearer one")).andExpect(status().isOk());
+        verify(tokens).revoke(hers);
+        mvc.perform(get("/api/agents/" + hers + "/activity").header("Authorization", "Bearer one")).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].detail").value("agent tokens revoked"));
         mvc.perform(get("/api/public/agents/stats")).andExpect(status().isOk()).andExpect(jsonPath("$.agents").isNumber());
     }
 
@@ -89,6 +98,8 @@ class ApiContractTests {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"access\":\"WRITE\"}"))
                 .andExpect(status().isForbidden());
         mvc.perform(post("/api/agents/" + mine + "/token").header("Authorization", "Bearer agent")).andExpect(status().isForbidden());
+        mvc.perform(post("/api/agents/" + mine + "/token/revoke").header("Authorization", "Bearer agent")).andExpect(status().isForbidden());
+        verify(tokens, never()).revoke(any());
         assertEquals("READ", agents.get(new Caller("3", "USER"), mine).getServers().get(0).getAccess().name(), "nothing it tried may have stuck");
     }
 }

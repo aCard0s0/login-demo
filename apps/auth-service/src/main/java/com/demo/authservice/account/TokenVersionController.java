@@ -6,11 +6,12 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * What todo-service polls to learn which tokens auth-service has revoked, since it checks tokens itself and
- * would otherwise honour a revoked one until it expired.
+ * What todo-, agent- and account-service poll to learn which tokens auth-service has revoked, since they check
+ * tokens themselves and would otherwise honour a revoked one until it expired. Accounts are keyed by id,
+ * agents -- whose tokens an owner can revoke alone -- by {@code agent:<id>}, in one map.
  *
  * <p>Outside /api on purpose: the web proxy forwards only /api, and neither service publishes a port, so
- * only the services on the compose network can reach this. It names account ids and counters, nothing else.
+ * only the services on the compose network can reach this. It names ids and counters, nothing else.
  */
 @RestController
 public class TokenVersionController {
@@ -22,7 +23,7 @@ public class TokenVersionController {
     }
 
     @GetMapping("/internal/token-versions")
-    public Map<Long, Integer> tokenVersions() {
+    public Map<String, Integer> tokenVersions() {
         return accounts.tokenVersions();
     }
 }

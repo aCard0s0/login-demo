@@ -39,7 +39,7 @@ class JwtVerifierTests {
 
         HttpServer jwks = publish(Map.of(
                 "/jwks.json", new JWKSet(advertised.toPublicJWK()).toString(),
-                "/token-versions", "{\"7\":2}"));
+                "/token-versions", "{\"7\":2,\"agent:9\":1}"));
         try {
             String base = "http://localhost:" + jwks.getAddress().getPort();
             JwtVerifier verifier = new JwtVerifier(base + "/jwks.json", new Revocations(base + "/token-versions"));
@@ -61,16 +61,26 @@ class JwtVerifierTests {
             assertFalse(roleless.readsEveryone());
 
             // An agent token is pinned to the one agent in its claim; one that names none is refused, not unpinned.
-            Caller agent = verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, 9L));
+            Caller agent = verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, 9L, 1));
             assertEquals(9L, agent.agentId());
             assertTrue(agent.isAgent());
             assertTrue(agent.mayActAs(9L));
             assertFalse(agent.mayActAs(10L));
             assertEquals("agent 9", agent.describe());
-            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT")),
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, null, 1)),
                     "an AGENT token with no agent claim would otherwise act as every agent of the owner");
-            assertNull(verifier.callerOf("Bearer " + token(advertised, "42", later, "USER", null, 9L)).agentId(),
+            assertNull(verifier.callerOf("Bearer " + token(advertised, "42", later, "USER", null, 9L, 1)).agentId(),
                     "an agent claim on anything but an AGENT token pins nothing");
+
+            // Agent 9's tokens were revoked once, alone: its older token dies, agent 10's and the owner's login live on.
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, 9L, 0)),
+                    "a token from before the agent's own revocation must not be accepted");
+            assertEquals(10L, verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, 10L, 0)).agentId(),
+                    "revoking one agent must not touch another's");
+            assertEquals("42", verifier.callerOf("Bearer " + token(advertised, "42", later, "USER")).accountId(),
+                    "nor the owner's login token");
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, 10L, null)),
+                    "an agent token minted before agentVer existed cannot be told from a revoked one, so it is refused");
 
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf(token(impostor, "42", later, "ADMIN")),
                     "a token signed by a key auth-service never published must not be accepted");
@@ -83,7 +93,7 @@ class JwtVerifierTests {
                     "a token from before the account's last revocation must not be accepted");
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "7", later, "USER")),
                     "a token with no version is version zero");
-            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "7", later, "AGENT", 1, 9L)),
+            assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "7", later, "AGENT", 1, 9L, 1)),
                     "revoking the owner kills their agents' tokens too");
             assertEquals("7", verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 2)).accountId());
             assertEquals("7", verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 3)).accountId(),
@@ -100,13 +110,16 @@ class JwtVerifierTests {
     }
 
     private static String token(RSAKey key, String subject, Instant expiry, String role, Integer version) throws Exception {
-        return token(key, subject, expiry, role, version, null);
+        return token(key, subject, expiry, role, version, null, null);
     }
 
-    private static String token(RSAKey key, String subject, Instant expiry, String role, Integer version, Long agent) throws Exception {
+    private static String token(RSAKey key, String subject, Instant expiry, String role, Integer version, Long agent, Integer agentVersion) throws Exception {
         JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder().subject(subject).expirationTime(Date.from(expiry));
         if (agent != null) {
             claims.claim("agent", agent);
+        }
+        if (agentVersion != null) {
+            claims.claim("agentVer", agentVersion);
         }
         if (role != null) {
             claims.claim("role", role);

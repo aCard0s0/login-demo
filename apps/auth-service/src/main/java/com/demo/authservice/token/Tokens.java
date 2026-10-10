@@ -70,10 +70,11 @@ public class Tokens {
     /**
      * A long-lived token for one of the account's agents to connect to agent-service with: the account as
      * subject, the {@code AGENT} role, and the agent's id as a claim so agent-service can pin it to that one
-     * agent. It carries the account's current token version like any other, so "revoke access" kills it too.
+     * agent. It carries the account's current token version like any other, so "revoke access" kills it too,
+     * and the agent's own version as {@code agentVer}, so the owner can kill this one agent's tokens alone.
      */
-    public String issueForAgent(Long accountId, String email, String name, int version, Long agentId) {
-        return issue(accountId, email, name, "AGENT", version, Map.of("agent", agentId), agentTtl);
+    public String issueForAgent(Long accountId, String email, String name, int version, Long agentId, int agentVersion) {
+        return issue(accountId, email, name, "AGENT", version, Map.of("agent", agentId, "agentVer", agentVersion), agentTtl);
     }
 
     private String issue(Long accountId, String email, String name, String role, int version,

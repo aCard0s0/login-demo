@@ -65,7 +65,8 @@ publish a port. An upstream that is down answers 502 rather than hanging. `/mcp`
 access `<select>` saves on change, so flipping READ to WRITE while an agent is connected is a one-click way to
 watch its next tool call obey it -- and refreshes the activity table after every save. **Create token** asks
 agent-service for a 30-day agent token and shows it once, inside a ready `claude mcp add` line; it is not
-stored anywhere in the browser. A stored authorization header shows only as *header set*; the value is never
+stored anywhere in the browser. **Revoke tokens** next to it kills every token made for that one agent, after
+a confirm; the owner's login and other agents are untouched. A stored authorization header shows only as *header set*; the value is never
 sent back.
 
 ## The bank in the UI

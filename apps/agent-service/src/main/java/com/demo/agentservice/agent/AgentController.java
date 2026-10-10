@@ -107,7 +107,7 @@ public class AgentController {
 
     /**
      * A long-lived token for an external agent to connect to {@code /mcp?agent=<id>} as this agent. Shown once
-     * and never stored; the account's "revoke access" is what kills it early.
+     * and never stored; {@link #revokeToken} kills it early, as does the account's "revoke access".
      */
     @PostMapping("/{id}/token")
     public Map<String, String> token(@RequestHeader(value = "Authorization", required = false) String authz,
@@ -117,6 +117,19 @@ public class AgentController {
         String token = tokens.issue(caller.accountId(), agent.getId());
         activity.record(agent.getId(), Activity.CONFIG_CHANGED, "agent token issued");
         return Map.of("token", token);
+    }
+
+    /**
+     * Kills every token ever made for this one agent and nothing else: the owner's login and their other agents'
+     * tokens live on. Bites in every service within its ten-second poll of the revocation feed.
+     */
+    @PostMapping("/{id}/token/revoke")
+    public void revokeToken(@RequestHeader(value = "Authorization", required = false) String authz,
+                            @PathVariable Long id) {
+        Caller caller = owner(authz);
+        Agent agent = agents.get(caller, id);
+        tokens.revoke(agent.getId());
+        activity.record(agent.getId(), Activity.CONFIG_CHANGED, "agent tokens revoked");
     }
 
     /** The agent's history, newest first. Reading it needs owning the agent, like everything else here. */

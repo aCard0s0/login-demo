@@ -60,7 +60,9 @@
     </p>
     <form id="token-form">
       <button id="token">Create token</button>
-      <small>Revoking access on your account kills every token ever made here.</small>
+      <button type="button" id="revoke-tokens">Revoke tokens</button>
+      <small>Revoke tokens kills every token made here for this agent, within ten seconds; your login and your other
+      agents are untouched. Revoking access on your account kills them all.</small>
     </form>
     <div id="connect" hidden>
       <p class="ok">Token created. Copy it now -- it is not stored and will not be shown again.</p>
@@ -260,6 +262,12 @@ $('client').onchange = renderSnippet;
 $('copy-token').onclick = () => copy($('token-value').value, 'Token');
 $('copy-snippet').onclick = () => copy($('snippet').textContent, 'Snippet');
 $('token-value').onclick = (e) => e.target.select();
+
+$('revoke-tokens').onclick = () => {
+  if (!confirm('Kill every token made for this agent? Anything connected with one stops working within ten seconds.')) return;
+  $('connect').hidden = true;
+  act(() => api(`/api/agents/${id}/token/revoke`, { method: 'POST' }), 'Tokens revoked.');
+};
 
 $('token-form').onsubmit = (e) => {
   e.preventDefault();

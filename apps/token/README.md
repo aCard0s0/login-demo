@@ -12,11 +12,14 @@ com.demo.token   JwtVerifier   the Authorization header -> a Caller, or 401
 
 `JwtVerifier` fetches auth-service's JWKS once, caches it, and verifies RS256 only -- a token asking for
 `none` or a symmetric algorithm is refused before its signature is looked at. `sub` and `exp` are required.
-A token whose `ver` is older than the account's last revocation is refused; an `AGENT` token must name its
-agent in the `agent` claim, or it is refused rather than read as "every agent of the owner".
+A token whose `ver` is older than the account's last revocation is refused. An `AGENT` token must name its
+agent in the `agent` claim, or it is refused rather than read as "every agent of the owner", and must carry
+`agentVer` at or above that agent's own last revocation -- a token with no `agentVer` at all is refused,
+because one minted before the claim existed cannot be told from one revoked since.
 
-`Revocations` **fails open**: if auth-service cannot be reached the last list stands, so a revocation made
-while it is down bites here once it is back. Failing closed would take every service down with it.
+`Revocations` reads one map: accounts by id, agents as `agent:<id>`, so the two cannot collide. It **fails
+open**: if auth-service cannot be reached the last list stands, so a revocation made while it is down bites
+here once it is back. Failing closed would take every service down with it.
 
 `Caller` answers the questions the services ask -- `isAgent`, `readsEveryone`, `writesEveryone`,
 `mayActAs`, `describe` -- and every one of them says "no" for a role it does not know.
@@ -34,4 +37,5 @@ Both beans are `@Component`s under `com.demo.token`, outside each service's own 
 ## Tests
 
 `./mvnw -pl apps/token test`. `JwtVerifierTests` runs against a real throwaway JWKS server rather than a
-mock: the advertised key and nothing else, expiry, the revocation feed, and the agent claim.
+mock: the advertised key and nothing else, expiry, the revocation feed for accounts and for one agent alone,
+and the agent claims.

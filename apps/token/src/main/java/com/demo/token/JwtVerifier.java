@@ -57,9 +57,17 @@ public class JwtVerifier {
             Object role = claims.getClaim("role");
             // An agent token carries the one agent it was minted for; any other token carries none.
             Long agent = "AGENT".equals(role) ? claims.getLongClaim("agent") : null;
-            // Without the claim the pin would silently become "every agent of the owner": refuse instead.
-            if ("AGENT".equals(role) && agent == null) {
-                throw new IllegalStateException("agent token names no agent");
+            if ("AGENT".equals(role)) {
+                // Without the claim the pin would silently become "every agent of the owner": refuse instead.
+                if (agent == null) {
+                    throw new IllegalStateException("agent token names no agent");
+                }
+                // The agent's own version, bumped when its owner revokes that one agent's tokens. Required, not
+                // defaulted to zero: a token from before the claim existed cannot be told from one revoked since.
+                Long agentVersion = claims.getLongClaim("agentVer");
+                if (agentVersion == null || agentVersion < revocations.minimumAgentVersion(agent)) {
+                    throw new IllegalStateException("agent token revoked");
+                }
             }
             return new Caller(claims.getSubject(), role == null ? "USER" : String.valueOf(role), agent);
         } catch (Exception e) {

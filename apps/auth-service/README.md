@@ -229,8 +229,18 @@ restart rather than an outage.
 ## Tokens
 
 An RSA keypair is generated at startup and never written to disk. Tokens are RS256 JWTs carrying `sub`
-(the account id), `email`, `name`, `role`, `ver` (the account's token version), `iat` and `exp`. The public half is published at
-`/api/jwks.json` with a `kid`, so a second key can be added later without breaking anything.
+(the account id), `email`, `name`, `role`, `ver` (the account's token version), `iat` and `exp`. An agent
+token adds `agent` (the one agent it is pinned to) and `agentVer` (that agent's own token version, see
+below). The public half is published at `/api/jwks.json` with a `kid`, so a second key can be added later
+without breaking anything.
+
+Two token versions, both kept here because this is where tokens are minted and where the feed the other
+services poll is served. The account's `tokenVersion` is bumped by an admin's revoke or suspend and kills
+every token the account holds. An agent's `AgentTokenVersion` row is bumped by its owner, through
+agent-service and `POST /internal/agent-tokens/{agentId}/revoke`, and kills that one agent's tokens alone.
+`/internal/token-versions` publishes both in one map, accounts by id and agents as `agent:<id>`, so the two
+kinds of key cannot collide. The services require `agentVer` on every agent token: one minted before the
+claim existed cannot be told from one revoked since, so it is refused.
 
 The id is the subject because it is the one thing about an account that never changes; a rename or a new
 email does not orphan anything that points at it.
@@ -251,8 +261,9 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 | PUT | `/api/accounts/{id}/role` | `{role}` -- admin only, else 403 |
 | PUT | `/api/accounts/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |
 | POST | `/api/accounts/{id}/revoke` | no body -- admin only; kills every token the account holds |
-| GET | `/internal/token-versions` | `{accountId: version}` for every revoked account; todo-service and agent-service poll it |
-| POST | `/internal/agent-tokens` | `{accountId, agentId}` -> `{token}`: a 30-day `AGENT` token for one agent; agent-service asks, with `X-Internal-Secret`, else 403 |
+| GET | `/internal/token-versions` | `{"<accountId>": version, "agent:<agentId>": version}` for every revoked account and agent; todo-, agent- and account-service poll it |
+| POST | `/internal/agent-tokens` | `{accountId, agentId}` -> `{token}`: a 30-day `AGENT` token for one agent, stamped with its `agentVer`; agent-service asks, with `X-Internal-Secret`, else 403 |
+| POST | `/internal/agent-tokens/{agentId}/revoke` | -> `{version}`: bumps that agent's version, killing every token minted for it; same secret, else 403 |
 | GET | `/api/oauth/providers` | `[{key, label}]` -- the configured providers, no token |
 | GET | `/api/oauth/{provider}/start` | 302 to consent, or 404 if that provider is off -- no token |
 | GET | `/api/oauth/{provider}/callback` | 302 to `/login#token=...&name=...&role=...` or `/login#error=...` -- no token |

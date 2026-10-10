@@ -244,7 +244,7 @@ class AccountMcpServerTests {
                     .claim("role", agent == null ? "USER" : "AGENT")
                     .expirationTime(Date.from(Instant.now().plusSeconds(300)));
             if (agent != null) {
-                claims.claim("agent", agent);
+                claims.claim("agent", agent).claim("agentVer", 0);
             }
             SignedJWT jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(KEY.getKeyID()).build(), claims.build());
             jwt.sign(new RSASSASigner(KEY));

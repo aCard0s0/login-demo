@@ -195,10 +195,16 @@ token it holds dies, until it is reactivated) or **revoke its access** (every to
 log straight back in). An admin cannot suspend itself.
 
 Both work through a per-account token version, stamped into every token as `ver` and bumped on revoke or
-suspend. auth-service compares it on every request, so both bite there at once. todo-service polls
-`/internal/token-versions` at most every 10 seconds and turns away any token older than the account's last
-revocation. That path is outside `/api`, so the web proxy never forwards it; if auth-service is unreachable
-todo-service keeps the last list it had.
+suspend. auth-service compares it on every request, so both bite there at once. todo-, agent- and
+account-service poll `/internal/token-versions` at most every 10 seconds and turn away any token older than
+the account's last revocation. That path is outside `/api`, so the web proxy never forwards it; if
+auth-service is unreachable they keep the last list they had.
+
+An owner can also revoke **one agent's tokens** alone, with **Revoke tokens** on the agent's page
+(`POST /api/agents/{id}/token/revoke`). That bumps a per-agent version auth-service keeps and stamps into
+agent tokens as `agentVer`; the same feed publishes it under `agent:<id>`, so an agent key can never collide
+with an account id. The owner's login and their other agents are untouched. An agent token minted before
+`agentVer` existed is refused outright, since it cannot be told from a revoked one.
 
 An admin changing *another* account's name, email or password is deliberately not implemented: editing an
 account requires its current password, and bypassing that would be account takeover rather than
@@ -231,7 +237,8 @@ claude mcp add --transport http todos "http://localhost:3000/mcp?agent=<id>" --h
 
 The token is either the owner's own login token (30 minutes) or one made with **Create token** on the
 agent's page: minted by auth-service with role `AGENT`, the owner as subject and the agent pinned by claim,
-good for 30 days, shown once, and killed with the owner's other tokens by **Revoke access**.
+good for 30 days, shown once, and killed early by **Revoke tokens** on that page (this agent's alone) or by
+**Revoke access** on the account (every token the owner holds).
 Step by step, for Claude Code, Cursor, VS Code and plain curl: [docs/connect-an-agent.md](docs/connect-an-agent.md).
 
 The permission is the service's, not the connecting agent's. **READ** offers only the tools a server
@@ -301,7 +308,8 @@ The consequences worth knowing:
 | auth | PUT | `/api/accounts/{id}/role` | yes -- admin only |
 | auth | PUT | `/api/accounts/{id}/suspended` | yes -- admin only |
 | auth | POST | `/api/accounts/{id}/revoke` | yes -- admin only |
-| auth | GET | `/internal/token-versions` | no -- compose network only, never proxied |
+| auth | GET | `/internal/token-versions` | no -- compose network only, never proxied; accounts by id, agents as `agent:<id>` |
+| auth | POST | `/internal/agent-tokens` · `/internal/agent-tokens/{agentId}/revoke` | `X-Internal-Secret` -- compose network only, never proxied; agent-service asks |
 | auth | GET | `/api/oauth/providers` | no |
 | auth | GET | `/api/oauth/{provider}/start` · `/callback` | no -- 302s the browser walks through |
 | auth | GET | `/api/public/stats` | no |
@@ -315,6 +323,7 @@ The consequences worth knowing:
 | agent | POST | `/api/agents/{id}/servers` · `PATCH`/`DELETE .../servers/{sid}` | yes -- owner only |
 | agent | GET | `/api/agents/{id}/activity` | yes -- owner only |
 | agent | POST | `/api/agents/{id}/token` | yes -- owner only; a 30-day token for connecting as this agent |
+| agent | POST | `/api/agents/{id}/token/revoke` | yes -- owner only; kills every token made for this one agent |
 | agent | POST | `/mcp?agent={id}` | yes -- MCP; owner's token or the agent's own; proxied |
 | agent | GET | `/api/public/agents/stats` | no |
 | account | GET · POST | `/api/bank/accounts` | yes -- user tokens only; an agent token is 403 on all of `/api/bank` |

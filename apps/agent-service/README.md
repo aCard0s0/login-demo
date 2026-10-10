@@ -41,7 +41,10 @@ An agent acts **as its owner**. An MCP client connects with either the owner's o
 token**: minted by auth-service on `POST /api/agents/{id}/token`, with the owner as `sub`, role `AGENT`, the
 agent's id in an `agent` claim, and a 30-day life. `/mcp` accepts a token when its subject owns the agent
 and, for an agent token, the claim names that very agent -- which also lets an agent token connect to plain
-`/mcp` with no `agent=` parameter; a login token must say which agent it means. Whatever token the client connected with is what a
+`/mcp` with no `agent=` parameter; a login token must say which agent it means. **Revoke tokens** on the
+page (`POST /api/agents/{id}/token/revoke`) kills every token made for that one agent: auth-service bumps
+the agent's own version, the token's `agentVer` falls behind it, and every service refuses it within its
+ten-second poll of the revocation feed. The owner's login and their other agents are untouched. Whatever token the client connected with is what a
 server row marked *forward caller token* receives as its `Authorization` header -- which is how the built-in
 todo server knows whose todos to show, and why a READ agent cannot see anybody else's. Agents are not
 accounts; the `AGENT` role lives only on these tokens, and **every `/api` endpoint in every service answers it
@@ -94,7 +97,7 @@ Plain text lines, newest first, a hundred at a time, deleted with the agent:
 | `connected` | an MCP client sent `initialize`: its name and version |
 | `tool_call` | a tool ran: `todos__list_todos {} -> ok: …` or `-> error: …`; also a server that could not be reached |
 | `tool_denied` | a tool was refused and why: `todos__add_todo: needs WRITE on server 'todos' (has READ)` |
-| `config_changed` | anything edited, by the owner or by another agent; also `agent token issued` |
+| `config_changed` | anything edited, by the owner or by another agent; also `agent token issued` and `agent tokens revoked` |
 
 ## The MCP endpoint
 
@@ -130,6 +133,7 @@ one fixed endpoint.
 | DELETE | `/api/agents/{id}/servers/{sid}` | |
 | GET | `/api/agents/{id}/activity` | newest first, at most 100 |
 | POST | `/api/agents/{id}/token` | → `{token}`: a 30-day agent token, shown once, never stored; 502 if auth-service is down |
+| POST | `/api/agents/{id}/token/revoke` | kills every token made for this agent; the owner's login and other agents live on; 502 if auth-service is down |
 | POST | `/mcp?agent={id}` | MCP Streamable HTTP, see above |
 | GET | `/api/public/agents/stats` | `{agents}` -- no token |
 
@@ -143,7 +147,7 @@ back as `{"error": "..."}` like everywhere else.
 | `server.port` | `SERVER_PORT` | `9083` |
 | `auth.jwks-uri` | `AUTH_JWKS_URI` | `http://localhost:9081/api/jwks.json` |
 | `auth.token-versions-uri` | `AUTH_TOKEN_VERSIONS_URI` | `http://localhost:9081/internal/token-versions` |
-| `auth.agent-tokens-uri` | `AUTH_AGENT_TOKENS_URI` | `http://localhost:9081/internal/agent-tokens` |
+| `auth.agent-tokens-uri` | `AUTH_AGENT_TOKENS_URI` | `http://localhost:9081/internal/agent-tokens`; `/{id}/revoke` under it is where a per-agent revoke goes |
 | `auth.internal-secret` | `AUTH_INTERNAL_SECRET` | `dev-internal-secret` -- sent as `X-Internal-Secret` when asking for a token; compose requires `INTERNAL_SECRET` in `.env` |
 | `spring.datasource.*` | `SPRING_DATASOURCE_*` | `jdbc:postgresql://localhost:5432/agent`, `agent` / `agent` |
 | `agents.todo-mcp-url` | `AGENTS_TODO_MCP_URL` | `http://localhost:9082/mcp`; blank seeds no server |
@@ -157,9 +161,8 @@ back as `{"error": "..."}` like everywhere else.
 - **Every `tools/call` reconnects** to the one downstream server: initialize, list its tools (for the
   read-only annotation), call, close. Three round trips per call. A short per-URL cache is the upgrade if
   latency ever matters.
-- **No per-agent revoke.** An agent token dies with the owner's other tokens (*Revoke access*, suspension)
-  or at 30 days. A `tokenVersion` column on agents, carried as a claim, is how one agent's tokens would be
-  killed alone.
+- **A per-agent revoke bites within ten seconds, not at once.** The other services poll the revocation feed
+  rather than ask auth-service per request, so a revoked agent token keeps working for up to one poll window.
 - **`authHeader` is stored in plain text**, like the database credentials in this demo.
 - **The forwarded token is the owner's full authority.** The built-in todo server checks it like the REST API
   does, so agent-service's READ/WRITE gate is the only thing between a READ agent and `delete_todo`. That is

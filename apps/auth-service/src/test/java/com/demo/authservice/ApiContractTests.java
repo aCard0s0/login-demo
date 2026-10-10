@@ -283,8 +283,23 @@ class ApiContractTests {
         assertEquals(String.valueOf(adaId), claims.getSubject());
         assertEquals("AGENT", claims.getStringClaim("role"));
         assertEquals(42L, claims.getLongClaim("agent"));
+        assertEquals(0L, claims.getLongClaim("agentVer"), "an agent never revoked is at version zero");
         long days = java.time.Duration.between(java.time.Instant.now(), claims.getExpirationTime().toInstant()).toDays();
         assertEquals(29, days, "30 days, minus the seconds this test took");
+
+        // Revoking one agent bumps its version alone: the feed says so under agent:<id>, the next token carries it,
+        // and the owner's own account is not in the feed at all.
+        mvc.perform(post("/internal/agent-tokens/42/revoke")).andExpect(status().isForbidden());
+        mvc.perform(post("/internal/agent-tokens/42/revoke").header("X-Internal-Secret", "test-internal-secret"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1));
+        mvc.perform(get("/internal/token-versions")).andExpect(status().isOk())
+                .andExpect(jsonPath("$['agent:42']").value(1))
+                .andExpect(jsonPath("$['" + adaId + "']").doesNotExist());
+        String fresh = mvc.perform(post("/internal/agent-tokens").header("X-Internal-Secret", "test-internal-secret")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":" + adaId + ",\"agentId\":42}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertEquals(1L, com.nimbusds.jwt.SignedJWT.parse(fresh.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1"))
+                .getJWTClaimsSet().getLongClaim("agentVer"));
 
         // Its only way in is /mcp: here it could edit its owner's account, so every /api endpoint answers it 403.
         mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
