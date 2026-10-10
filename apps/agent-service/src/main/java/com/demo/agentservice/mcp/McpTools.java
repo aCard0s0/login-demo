@@ -13,14 +13,22 @@ import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import java.net.Authenticator;
+import java.net.CookieHandler;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Executor;
 
 /**
  * The MCP servers an agent's owner attached, seen through that agent's permissions.
@@ -56,15 +64,16 @@ final class McpTools {
      */
     static List<Tool> list(Agent agent, String bearer, ActivityLog activity, ServerUrls urls) {
         Map<String, Tool> offered = new LinkedHashMap<>();
+        Set<String> clashed = new HashSet<>();
         for (AgentMcpServer server : agent.getServers()) {
             try {
                 for (Tool tool : tools(server, bearer, urls)) {
                     if (server.getAccess().allows(readOnly(server, tool, urls))) {
                         Tool mine = renamed(server, tool);
-                        // Two long names cut to the same 64 characters: offer neither as that name, rather than one at random.
+                        // Long names cut to the same 64 characters: offer none of them as that name, rather than one at random.
                         if (offered.putIfAbsent(mine.name(), mine) != null) {
                             log.warn("agent {} server '{}': tool '{}' truncates to '{}' like another; not offered", agent.getId(), server.getName(), tool.name(), mine.name());
-                            offered.remove(mine.name());
+                            clashed.add(mine.name());
                         }
                     }
                 }
@@ -74,6 +83,7 @@ final class McpTools {
                         "server '" + server.getName() + "': could not connect: " + ActivityLog.brief(e.getMessage()));
             }
         }
+        offered.keySet().removeAll(clashed);
         return new ArrayList<>(offered.values());
     }
 
@@ -143,9 +153,7 @@ final class McpTools {
         String base = url.getScheme() + "://" + url.getRawAuthority();
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base)
                 .endpoint(endpoint(url))
-                // A public server answering 302 to a private address would be the check above, undone.
-                .customizeClient(client -> client.followRedirects(HttpClient.Redirect.NEVER))
-                .connectTimeout(Duration.ofSeconds(5))
+                .clientBuilder(new SharedHttpClient())
                 .httpRequestCustomizer((request, method, uri, body, context) -> {
                     if (auth != null) {
                         request.header("Authorization", auth);
@@ -163,6 +171,31 @@ final class McpTools {
             throw e;
         }
         return client;
+    }
+
+    /**
+     * One JDK client for every downstream connection. The SDK builds a client per transport and never closes it, so
+     * each would keep a selector thread and connection pool alive until the collector found it; this builder hands
+     * the SDK the same client every time and ignores what it tries to set on it, which is only the connect timeout.
+     */
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            // A public server answering 302 to a private address would be the URL check, undone.
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
+
+    private static final class SharedHttpClient implements HttpClient.Builder {
+        public HttpClient build() { return HTTP; }
+        public HttpClient.Builder cookieHandler(CookieHandler h) { return this; }
+        public HttpClient.Builder connectTimeout(Duration d) { return this; }
+        public HttpClient.Builder sslContext(SSLContext c) { return this; }
+        public HttpClient.Builder sslParameters(SSLParameters p) { return this; }
+        public HttpClient.Builder executor(Executor e) { return this; }
+        public HttpClient.Builder followRedirects(HttpClient.Redirect r) { return this; }
+        public HttpClient.Builder version(HttpClient.Version v) { return this; }
+        public HttpClient.Builder priority(int p) { return this; }
+        public HttpClient.Builder proxy(ProxySelector s) { return this; }
+        public HttpClient.Builder authenticator(Authenticator a) { return this; }
     }
 
     /** Path and query of the stored URL, as the SDK's endpoint: {@code /mcp?agent=5} must keep its {@code ?agent=5}. */
