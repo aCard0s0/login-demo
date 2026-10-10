@@ -398,7 +398,7 @@ cmd_verify() {
   reply=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" -H 'content-type: application/json' \
     -H 'accept: application/json, text/event-stream' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"todos__delete_todo\",\"arguments\":{\"id\":$todo}}}") || die "tools/call failed" 1
-  case "$reply" in *'"isError":true'*'needs WRITE'*) ;; *) die "a READ agent was not refused a delete over MCP: $reply" 1 ;; esac
+  case "$reply" in *'needs WRITE'*'"isError":true'*) ;; *) die "a READ agent was not refused a delete over MCP: $reply" 1 ;; esac
   todos=$(curl -fsS "$base/api/todos" -H "Authorization: Bearer $token")
   case "$todos" in *'"verify edit"'*) ;; *) die "the todo is gone after a refused delete: $todos" 1 ;; esac
   if curl -fsS -o /dev/null -X POST "$base/mcp?agent=$id" -H 'content-type: application/json' \
