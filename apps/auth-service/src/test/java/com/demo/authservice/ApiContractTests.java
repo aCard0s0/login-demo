@@ -210,8 +210,11 @@ class ApiContractTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.role").value("MODERATOR"));
 
-        // The role is read from the user, not from the claims, so the token Mary already holds is enough.
+        // The role rides inside the token and the other services read it from there, so a change of role
+        // kills the token Mary already holds; the next login carries the new one.
         mvc.perform(get("/api/users").header("Authorization", "Bearer " + user))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/users").header("Authorization", "Bearer " + login("mary@example.com", "jackson-1921")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").isNumber())
                 .andExpect(jsonPath("$[0].passwordHash").doesNotExist());

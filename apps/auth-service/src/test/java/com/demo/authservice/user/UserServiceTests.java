@@ -50,8 +50,16 @@ class UserServiceTests {
         User admin = auth.ensureAdmin("boss@example.com", "boss-pass-01");
         User user = auth.register("Rosalind", "rosalind@example.com", "franklin-1920");
 
+        String before = auth.issue(user);
         assertEquals(Role.MODERATOR, auth.changeRole(admin, user.getId(), Role.MODERATOR).getRole());
-        assertEquals(Role.USER, auth.changeRole(admin, user.getId(), Role.USER).getRole(), "and back again");
+        assertTrue(auth.byToken(before).isEmpty(),
+                "the role rides in the token and the other services read it from there, so the old one must die");
+        User demoted = auth.changeRole(admin, user.getId(), Role.USER);
+        assertEquals(Role.USER, demoted.getRole(), "and back again");
+        assertEquals(demoted.getTokenVersion(), auth.tokenVersions().get(String.valueOf(user.getId())),
+                "and the feed the other services poll says so");
+        assertEquals(demoted.getTokenVersion(), auth.changeRole(admin, user.getId(), Role.USER).getTokenVersion(),
+                "setting the role it already has revokes nothing");
 
         assertThrows(ResponseStatusException.class, () -> auth.changeRole(admin, user.getId(), null));
         assertThrows(ResponseStatusException.class, () -> auth.changeRole(admin, 999_999L, Role.MODERATOR));

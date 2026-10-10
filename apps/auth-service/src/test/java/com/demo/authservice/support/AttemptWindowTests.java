@@ -30,4 +30,22 @@ class AttemptWindowTests {
         window.record("a");
         assertFalse(window.exceeded("a"), "and the next attempt starts a fresh one rather than continuing it");
     }
+
+    @Test
+    void aFullMapStopsTakingNewKeysButKeepsCountingTheOnesItHas() throws Exception {
+        AttemptWindow window = new AttemptWindow(1, Duration.ofMillis(50), 2);
+
+        window.record("a");
+        window.record("b");
+        window.record("c");
+        assertFalse(window.exceeded("c"), "a key past the cap is not kept: fail open, not a lockout for everyone");
+        window.record("a");
+        assertTrue(window.exceeded("a"), "a key already there still counts");
+
+        Thread.sleep(60);
+        // Expired runs are swept at most once a second, so a fresh key gets in only once that second has passed.
+        Thread.sleep(1_000);
+        window.record("c");
+        assertTrue(window.exceeded("c"), "once the old runs have expired and been swept, room is made");
+    }
 }
