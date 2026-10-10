@@ -11,8 +11,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.time.Duration;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -185,5 +191,74 @@ class UserServiceTests {
         assertEquals(revoked.getTokenVersion(), auth.tokenVersions().get(String.valueOf(linus.getId())),
                 "todo-service learns the new version from this map");
         assertTrue(auth.byToken(auth.issue(revoked)).isPresent(), "logging back in still works");
+    }
+
+    @Test
+    void aPasswordChangeRevokesTheOldTokensAndAPlainEditDoesNot() {
+        User hopper = auth.register("Grace", "grace.h@example.com", "cobol-1959");
+        String first = auth.issue(hopper);
+
+        User renamed = auth.update(hopper.getId(), "Grace H", "grace.h@example.com", "cobol-1959", null);
+        assertEquals(hopper.getTokenVersion(), renamed.getTokenVersion(), "a rename revokes nothing");
+        assertTrue(auth.byToken(first).isPresent(), "so the token held across it still works");
+
+        User moved = auth.update(hopper.getId(), "Grace H", "grace.h@example.com", "cobol-1959", "flowmatic-1955");
+        assertEquals(hopper.getTokenVersion() + 1, moved.getTokenVersion());
+        assertTrue(auth.byToken(first).isEmpty(), "whoever had the old password must not keep its session");
+        assertTrue(auth.byToken(auth.issue(moved)).isPresent());
+        assertThrows(ResponseStatusException.class,
+                () -> auth.update(hopper.getId(), "Grace H", "grace.h@example.com", "cobol-1959", null),
+                "and the old password no longer opens the profile");
+    }
+
+    /**
+     * update() reads, hashes outside any transaction, then writes. These are the two races that gap opens, run
+     * against the repository directly so the interleaving is the test's and not the scheduler's.
+     */
+    @Test
+    void anEditKeepsARevokeThatLandedMidwayAndRefusesAPasswordChangedMidway() {
+        User ken = auth.register("Ken", "ken@example.com", "thompson-1943");
+        User read = users.findById(ken.getId()).orElseThrow();
+
+        auth.revokeTokens(ken.getId());
+        assertEquals(1, users.edit(ken.getId(), "Ken T", "ken@example.com", read.getPasswordHash(), read.getPasswordHash(), 1));
+        assertEquals(read.getTokenVersion() + 2, users.findById(ken.getId()).orElseThrow().getTokenVersion(),
+                "the bump is relative, so the revoke in between is kept rather than written back stale");
+
+        auth.update(ken.getId(), "Ken T", "ken@example.com", "thompson-1943", "unix-1969");
+        assertEquals(0, users.edit(ken.getId(), "Overwritten", "ken@example.com", read.getPasswordHash(), read.getPasswordHash(), 0),
+                "a hash that is no longer current matches no row");
+        assertEquals("Ken T", users.findById(ken.getId()).orElseThrow().getName());
+    }
+
+    @Test
+    void theFeedCarriesOnlyRevokedUsersAndAgents() {
+        User fresh = auth.register("Fresh", "fresh@example.com", "fresh-pass-01");
+        assertFalse(auth.tokenVersions().containsKey(String.valueOf(fresh.getId())), "a user never revoked is not in it");
+
+        assertEquals(1, auth.revokeAgentTokens(77L), "a first revoke inserts at one");
+        assertEquals(2, auth.revokeAgentTokens(77L), "and every later one adds one");
+        assertEquals(2, auth.tokenVersions().get("agent:77"));
+        assertFalse(auth.tokenVersions().containsKey("agent:78"));
+    }
+
+    // On the tests' single SQLite connection these serialise, so this pins the upsert's answer -- no failure, no
+    // lost bump -- rather than reproducing the race, which needs Postgres and a pool.
+    @Test
+    void firstRevokesLandingTogetherAreAllCounted() throws Exception {
+        int revokes = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(revokes);
+        try {
+            List<Future<Integer>> answers = new ArrayList<>();
+            for (int i = 0; i < revokes; i++) {
+                answers.add(pool.submit(() -> auth.revokeAgentTokens(88L)));
+            }
+            for (Future<Integer> answer : answers) {
+                answer.get();
+            }
+        } finally {
+            pool.shutdown();
+        }
+        assertEquals(revokes, auth.tokenVersions().get("agent:88"), "no bump lost to a race on the first insert");
     }
 }

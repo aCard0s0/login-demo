@@ -52,4 +52,15 @@ class OAuthFlowTests {
         assertTrue(consent.contains("redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fapi%2Foauth%2Fon%2Fcallback"), consent);
         assertTrue(consent.endsWith("&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"), consent);
     }
+
+    @Test
+    void theRedirectUriTrimsTheBaseAndFollowsACustomCallbackPath() {
+        OAuthProperties config = new OAuthProperties();
+        config.setRedirectBaseUrl("https://app.example.com//");
+        assertEquals("https://app.example.com/api/oauth/on/callback", config.redirectUri(new Fake("on")),
+                "a trailing slash in .env must not become a double slash the provider refuses as a mismatch");
+
+        config.setCallbackPath("/auth/{provider}/back");
+        assertEquals("https://app.example.com/auth/on/back", config.redirectUri(new Fake("on")));
+    }
 }
