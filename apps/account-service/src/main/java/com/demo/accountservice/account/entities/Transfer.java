@@ -1,4 +1,4 @@
-package com.demo.accountservice.account;
+package com.demo.accountservice.account.entities;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

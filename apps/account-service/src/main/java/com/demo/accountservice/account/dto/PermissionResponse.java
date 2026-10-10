@@ -1,4 +1,6 @@
-package com.demo.accountservice.account;
+package com.demo.accountservice.account.dto;
+
+import com.demo.accountservice.account.entities.AccountPermission;
 
 public record PermissionResponse(Long agentId, Access access) {
 

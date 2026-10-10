@@ -1,5 +1,10 @@
 package com.demo.accountservice.account;
 
+import com.demo.accountservice.account.dto.Access;
+import com.demo.accountservice.account.dto.NewAccount;
+import com.demo.accountservice.account.entities.Account;
+import com.demo.accountservice.account.entities.AccountPermission;
+import com.demo.accountservice.account.entities.Transfer;
 import com.demo.accountservice.token.Caller;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;

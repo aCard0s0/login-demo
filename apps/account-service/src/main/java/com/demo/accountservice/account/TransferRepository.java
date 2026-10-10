@@ -1,5 +1,6 @@
 package com.demo.accountservice.account;
 
+import com.demo.accountservice.account.entities.Transfer;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
