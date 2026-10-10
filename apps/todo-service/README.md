@@ -48,15 +48,20 @@ next request. `auth.token-ttl` (default 30m) is that delay's upper bound.
 See the [root README](../../README.md#roles) for the matrix that spans both services. What *this* service
 enforces:
 
-| Endpoint | ADMIN | MODERATOR | AGENT | USER |
+| Endpoint | ADMIN | MODERATOR | AGENT token | USER |
 |---|---|---|---|---|
-| `GET /api/todos` | everyone's | everyone's | own | own |
-| `POST /api/todos` | own | own | own | own |
-| `PUT /api/todos/{id}` | anyone's | own, else 404 | own | own |
-| `PATCH /api/todos/{id}` | anyone's | own, else 404 | own | own |
-| `DELETE /api/todos/{id}` | anyone's | own, else 404 | own | own |
+| `GET /api/todos` | everyone's | everyone's | 403 | own |
+| `POST /api/todos` | own | own | 403 | own |
+| `PUT /api/todos/{id}` | anyone's | own, else 404 | 403 | own |
+| `PATCH /api/todos/{id}` | anyone's | own, else 404 | 403 | own |
+| `DELETE /api/todos/{id}` | anyone's | own, else 404 | 403 | own |
 
 A todo is always created for the caller whatever their role -- there is no "add this one to someone else".
+
+The REST API takes **user tokens only**. An agent token (role `AGENT`, pinned to one of the user's agents,
+good for 30 days) is 403 on every verb: its way in is `/mcp` through agent-service, where the agent's
+READ/WRITE setting is applied and every call is logged. Over REST a READ agent could `DELETE` and skip both.
+`/mcp` itself does take the agent token, because that is what agent-service forwards -- see below.
 
 `TodoRepository` has an owner-scoped query for each operation (`findByOwnerOrderByIdAsc`,
 `findByIdAndOwner`) plus the two unscoped reads the read-everyone roles need. `TodoService` is the only
@@ -101,15 +106,16 @@ the compose network.
 
 | Method | Path | Body / notes |
 |---|---|---|
-| GET | `/api/todos` | the caller's own, or everyone's for a read-everyone role |
-| POST | `/api/todos` | `{title}` |
-| PUT | `/api/todos/{id}` | toggle done -- no body, so no read needed first |
-| PATCH | `/api/todos/{id}` | `{title?, done?}` -- only the fields sent change |
-| DELETE | `/api/todos/{id}` | |
+| GET | `/api/todos` | the caller's own, or everyone's for a read-everyone role; an agent token is 403 |
+| POST | `/api/todos` | `{title}`; an agent token is 403 |
+| PUT | `/api/todos/{id}` | toggle done -- no body, so no read needed first; an agent token is 403 |
+| PATCH | `/api/todos/{id}` | `{title?, done?}` -- only the fields sent change; an agent token is 403 |
+| DELETE | `/api/todos/{id}` | an agent token is 403 |
 | GET | `/api/public/todos/stats` | `{todos}` -- no token |
-| POST | `/mcp` | MCP Streamable HTTP, see above -- compose network only |
+| POST | `/mcp` | MCP Streamable HTTP, see above -- compose network only; the one place an agent token is good |
 
-Everything except the public count needs `Authorization: Bearer <token>`. A null field in a PATCH means "leave it
+Everything except the public count needs `Authorization: Bearer <token>`, and under `/api` it must be a
+user's own. A null field in a PATCH means "leave it
 alone", so renaming a todo cannot flip its done flag by omitting it. Every rejection comes back as
 `{"error": "..."}` in the same shape auth-service uses, which `TodoExceptionAdvice` is responsible for.
 
@@ -130,7 +136,8 @@ docker compose up -d db                  # it still needs a database
 ./mvnw -pl apps/todo-service test        # SQLite backed: needs nothing running
 ```
 
-Tests: `TodoServiceTests` for the ownership and role rules -- the token check itself is tested once, in
-`apps/token` -- and `TodoMcpServerTests`, which drives `/mcp` with the real MCP client over real
+Tests: `TodoServiceTests` for the ownership and role rules, `ApiContractTests` for the 401 and the 403 an
+agent token gets on every verb -- the token check itself is tested once, in `apps/token` -- and
+`TodoMcpServerTests`, which drives `/mcp` with the real MCP client over real
 HTTP: the annotation on `list_todos` and on nothing else, two callers who cannot see each other's todos, and
 a missing token answered with an error result.

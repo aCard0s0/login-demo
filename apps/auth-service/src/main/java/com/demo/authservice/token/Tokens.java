@@ -97,8 +97,8 @@ public class Tokens {
         return jwt.serialize();
     }
 
-    /** What a verified token says about its account: which one, and which generation of its tokens. */
-    public record Claims(Long accountId, int version) {}
+    /** What a verified token says about its account: which one, which generation of its tokens, and whether it was minted for an agent. */
+    public record Claims(Long accountId, int version, boolean agent) {}
 
     /** What a token names, or empty if the signature is wrong, the token is malformed, or it has expired. */
     public Optional<Claims> claimsFrom(String token) {
@@ -116,7 +116,7 @@ public class Tokens {
             }
             Long version = jwt.getJWTClaimsSet().getLongClaim("ver");
             return Optional.of(new Claims(Long.valueOf(jwt.getJWTClaimsSet().getSubject()),
-                    version == null ? 0 : version.intValue()));
+                    version == null ? 0 : version.intValue(), "AGENT".equals(jwt.getJWTClaimsSet().getStringClaim("role"))));
         } catch (Exception e) {
             return Optional.empty();
         }

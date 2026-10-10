@@ -44,9 +44,11 @@ and, for an agent token, the claim names that very agent -- which also lets an a
 `/mcp` with no `agent=` parameter; a login token must say which agent it means. Whatever token the client connected with is what a
 server row marked *forward caller token* receives as its `Authorization` header -- which is how the built-in
 todo server knows whose todos to show, and why a READ agent cannot see anybody else's. Agents are not
-accounts; the `AGENT` role lives only on these tokens. It behaves like `USER` at auth-service and todo-service,
-but `/api/agents/*` answers it **403**: an agent token that could edit agents would widen its own access or
-mint itself fresh tokens, the very thing the agent tools refuse.
+accounts; the `AGENT` role lives only on these tokens, and **every `/api` endpoint in every service answers it
+403**. Here, an agent token that could edit agents would widen its own access or mint itself fresh tokens,
+the very thing the agent tools refuse; at todo-service and account-service it would skip the READ/WRITE gate
+below and the activity log; at auth-service it could change its owner's password. Its one way in is `/mcp`,
+and the only places it is good downstream are the `/mcp` endpoints agent-service forwards it to.
 
 ## The permission rule
 

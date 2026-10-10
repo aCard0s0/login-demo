@@ -291,7 +291,7 @@ cmd_db_reset_help() { say "  Drops the volume, so the init script runs again and
 cmd_verify() {
   no_args "$@"
   have curl || die "curl is not on PATH — verify talks to the stack over real HTTP" 3
-  local base="http://localhost:$PORT" email pass token todos id
+  local base="http://localhost:$PORT" email pass token todos id todo
   if [ -n "$DRY_RUN" ]; then note "+ would register an account and write a todo, a bank account and an agent against $base"; return 0; fi
 
   curl -fsS -o /dev/null "$base/api/public/stats" 2>/dev/null \
@@ -326,6 +326,7 @@ cmd_verify() {
     || die "the edit was refused" 1
   todos=$(curl -fsS "$base/api/todos" -H "Authorization: Bearer $token")
   case "$todos" in *'"verify edit"'*'"done":true'*) ;; *) die "the edit did not stick: $todos" 1 ;; esac
+  todo=$id
 
   # The point of the whole design: no token, no todos.
   if curl -fsS -o /dev/null "$base/api/todos" 2>/dev/null; then
@@ -364,23 +365,38 @@ cmd_verify() {
   atoken=$(curl -fsS -X POST "$base/api/agents/$id/token" -H "Authorization: Bearer $token" \
     | sed -E 's/.*"token":"([^"]+)".*/\1/') || die "agent-service could not get a token from auth-service" 1
   case "$atoken" in *.*.*) ;; *) die "the agent token did not come back as a three-part JWT: $atoken" 1 ;; esac
-  # An agent's way into the bank is MCP through agent-service, where READ/WRITE and the activity log apply.
-  local code
-  code=$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/bank/accounts" -H "Authorization: Bearer $atoken") || true
-  [ "$code" = 403 ] || die "the bank's REST API answered the agent token with $code, not 403" 1
+  # An agent token opens /mcp and nothing else. Over REST it would skip agent-service's READ/WRITE check: a READ
+  # agent could DELETE a todo with its 30-day token, or edit its owner's account. Every service must say 403.
+  local code probe
+  for probe in "GET /api/todos" "DELETE /api/todos/$todo" "GET /api/accounts/me" "GET /api/bank/accounts" "GET /api/agents"; do
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -X "${probe%% *}" "$base${probe#* }" -H "Authorization: Bearer $atoken") || true
+    [ "$code" = 403 ] || die "$probe answered the agent token with $code, not 403 -- an agent bypassed the MCP gate" 1
+  done
   # The point of the whole design: an MCP client with the agent's token sees the one read-only todo tool and no other.
   tools=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" \
     -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}') || die "the MCP endpoint refused the agent token" 1
   case "$tools" in *'"name":"todos__list_todos"'*) ;; *) die "tools/list did not offer todos__list_todos: $tools" 1 ;; esac
   case "$tools" in *'todos__add_todo'*) die "a READ agent was offered a writing tool: $tools" 1 ;; esac
+  # Over MCP the same token lists the owner's todos, and a delete is refused by agent-service before it is forwarded.
+  local reply
+  reply=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"todos__list_todos","arguments":{}}}') || die "tools/call failed" 1
+  case "$reply" in *'verify edit'*) ;; *) die "a READ agent could not list the todos over MCP: $reply" 1 ;; esac
+  reply=$(curl -fsS -X POST "$base/mcp?agent=$id" -H "Authorization: Bearer $atoken" -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"todos__delete_todo\",\"arguments\":{\"id\":$todo}}}") || die "tools/call failed" 1
+  case "$reply" in *'"isError":true'*'needs WRITE'*) ;; *) die "a READ agent was not refused a delete over MCP: $reply" 1 ;; esac
+  todos=$(curl -fsS "$base/api/todos" -H "Authorization: Bearer $token")
+  case "$todos" in *'"verify edit"'*) ;; *) die "the todo is gone after a refused delete: $todos" 1 ;; esac
   if curl -fsS -o /dev/null -X POST "$base/mcp?agent=$id" -H 'content-type: application/json' \
     -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' 2>/dev/null \
     | grep -q '"tools"'; then
     die "the MCP endpoint listed tools with no token at all" 1
   fi
 
-  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows, the bank refused the agent token over REST"
+  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows, every REST API refused the agent token"
   note "this left an account, a todo, a bank account and an agent behind: $email"
   note "connect your own agent: open /agent?id=$id, Create token, paste the claude mcp add line"
 }

@@ -29,7 +29,9 @@ import java.util.stream.Collectors;
  * {@link TodoService} method, so the owner rules there apply to an agent exactly as they do to the browser.
  *
  * <p>Who is asking comes from the {@code Authorization} header on the MCP request, carried over from the user
- * who started the agent, and is checked by the same {@link JwtVerifier} as the REST API. Only {@code list_todos}
+ * who started the agent, and is checked by the same {@link JwtVerifier} as the REST API -- except that this
+ * endpoint, unlike the REST API, does take an agent token: agent-service forwards it here after applying the
+ * agent's READ/WRITE setting, which is the only reason an agent token is good anywhere. Only {@code list_todos}
  * declares itself read-only; that annotation is what agent-service's READ permission keys on, so leaving it
  * off a tool that writes is the one thing this class must never do.
  *

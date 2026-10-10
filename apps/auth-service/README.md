@@ -33,8 +33,8 @@ spans both services; what *this* service enforces is:
 
 | Endpoint | ADMIN | MODERATOR | AGENT | USER |
 |---|---|---|---|---|
-| `GET /api/accounts/me` | own | own | own | own |
-| `PUT /api/accounts/me` | own | own | own | own |
+| `GET /api/accounts/me` | own | own | 403 | own |
+| `PUT /api/accounts/me` | own | own | 403 | own |
 | `GET /api/accounts` | everyone | everyone | 403 | 403 |
 | `PUT /api/accounts/{id}/role` | any account | 403 | 403 | 403 |
 | `PUT /api/accounts/{id}/suspended` · `POST /api/accounts/{id}/revoke` | any account | 403 | 403 | 403 |
@@ -49,6 +49,11 @@ Two rules worth knowing:
 - **The role is read from the account row, not from the token's claims.** A promotion or demotion takes
   effect on the next request, on a token the holder already has. (todo-service is the opposite -- see its
   README for why.)
+
+An **agent token** -- the `AGENT` role, minted for one of a user's agents -- is 403 on every endpoint here,
+`GET /api/accounts/me` included. Its only way in is `/mcp` through agent-service; let in here it could change
+its owner's email and password with a 30-day token. `AccountService.byToken` refuses it after checking it is
+otherwise valid, so a revoked or expired agent token is still a plain 401 and says nothing more.
 
 An admin changing *another* account's name, email or password is deliberately not implemented:
 `PUT /api/accounts/me` requires the current password even to change only the name, and admin-bypassing that
@@ -240,8 +245,8 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 |---|---|---|
 | POST | `/api/accounts` | `{name, email, password}` -> 201 `{id, name, email, role}`, always `USER`; 429 past the cap |
 | POST | `/api/login` | `{email, password}` -> `{token, name, email, role}`, 401, or 429 once locked out |
-| GET | `/api/accounts/me` | the caller's own account |
-| PUT | `/api/accounts/me` | `{name, email, currentPassword, newPassword?}` |
+| GET | `/api/accounts/me` | the caller's own account; an agent token is 403 |
+| PUT | `/api/accounts/me` | `{name, email, currentPassword, newPassword?}`; an agent token is 403 |
 | GET | `/api/accounts` | everyone -- admin and moderator only, else 403 |
 | PUT | `/api/accounts/{id}/role` | `{role}` -- admin only, else 403 |
 | PUT | `/api/accounts/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |

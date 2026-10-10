@@ -153,20 +153,27 @@ Endpoint by endpoint:
 
 | Service | Endpoint | ADMIN | MODERATOR | AGENT | USER |
 |---|---|---|---|---|---|
-| auth | `GET`/`PUT /api/accounts/me` | own | own | own | own |
+| auth | `GET`/`PUT /api/accounts/me` | own | own | 403 | own |
 | auth | `GET /api/accounts` | everyone | everyone | 403 | 403 |
 | auth | `PUT /api/accounts/{id}/role` | any account | 403 | 403 | 403 |
 | auth | `PUT /api/accounts/{id}/suspended` · `POST /api/accounts/{id}/revoke` | any account | 403 | 403 | 403 |
-| todo | `GET /api/todos` | everyone's | everyone's | own | own |
-| todo | `POST /api/todos` | own | own | own | own |
-| todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | own | own |
-| agent | everything under `/api/agents` | own | own | own | own |
+| todo | `GET /api/todos` | everyone's | everyone's | 403; over MCP its owner's | own |
+| todo | `POST /api/todos` | own | own | 403; over MCP its owner's, if WRITE | own |
+| todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | 403; over MCP its owner's, if WRITE | own |
+| agent | everything under `/api/agents` | own | own | 403 | own |
 | account | `GET /api/bank/accounts` · `GET .../{id}` · `GET .../{id}/transfers` | everyone's | everyone's | 403; over MCP its own + granted | own + its agents' |
 | account | `POST /api/bank/accounts/{id}/transfers` | anyone's | own, else 404 | 403; over MCP its own + WRITE grants | own + its agents' |
 | account | `POST /api/bank/accounts` · `.../deposit` · `PUT`/`DELETE .../permissions/{agentId}` | anyone's | own, else 404 | 403 | own + its agents' |
 
 A todo -- or an agent -- belonging to someone else comes back **404, not 403**, so neither answer says whether
 it exists. Agents are the one thing no role sees across accounts, an admin included.
+
+**An agent token is 403 on every `/api` endpoint, in every service.** Its only way in is `/mcp` through
+agent-service, where the agent's READ/WRITE setting and activity log apply; over REST a READ agent could
+delete a todo with its 30-day token, or change its owner's password, and skip both. The MCP endpoints of
+todo-service and account-service are the one place an agent token is good, and only agent-service reaches
+them. The endpoints that take no token at all -- registration, login, the OAuth redirects, `/api/public/*`,
+`/api/jwks.json` -- are unaffected, since there is no token to refuse.
 
 Registration always produces a `USER` -- `POST /api/accounts` has no role field to ask with, and
 `PUT /api/accounts/me` cannot change one. `PUT /api/accounts/{id}/role` is the single door off `USER`, and
@@ -289,7 +296,7 @@ The consequences worth knowing:
 |---|---|---|---|
 | auth | POST | `/api/accounts` | no -- this is registration |
 | auth | POST | `/api/login` | no |
-| auth | GET · PUT | `/api/accounts/me` | yes |
+| auth | GET · PUT | `/api/accounts/me` | yes -- user tokens only; an agent token is 403 on all of `/api/accounts` |
 | auth | GET | `/api/accounts` | yes -- admin and moderator only |
 | auth | PUT | `/api/accounts/{id}/role` | yes -- admin only |
 | auth | PUT | `/api/accounts/{id}/suspended` | yes -- admin only |
@@ -299,11 +306,11 @@ The consequences worth knowing:
 | auth | GET | `/api/oauth/{provider}/start` · `/callback` | no -- 302s the browser walks through |
 | auth | GET | `/api/public/stats` | no |
 | auth | GET | `/api/jwks.json` | no |
-| todo | GET · POST | `/api/todos` | yes |
-| todo | PUT · PATCH · DELETE | `/api/todos/{id}` | yes |
+| todo | GET · POST | `/api/todos` | yes -- user tokens only; an agent token is 403 on all of `/api/todos` |
+| todo | PUT · PATCH · DELETE | `/api/todos/{id}` | yes -- user tokens only |
 | todo | GET | `/api/public/todos/stats` | no |
-| todo | POST | `/mcp` | yes -- MCP, compose network only, never proxied |
-| agent | GET · POST | `/api/agents` | yes |
+| todo | POST | `/mcp` | yes -- MCP, agent or login token as forwarded by agent-service, compose network only, never proxied |
+| agent | GET · POST | `/api/agents` | yes -- user tokens only; an agent token is 403 on all of `/api/agents` |
 | agent | GET · PATCH · DELETE | `/api/agents/{id}` | yes -- owner only |
 | agent | POST | `/api/agents/{id}/servers` · `PATCH`/`DELETE .../servers/{sid}` | yes -- owner only |
 | agent | GET | `/api/agents/{id}/activity` | yes -- owner only |

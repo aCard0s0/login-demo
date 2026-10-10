@@ -264,6 +264,11 @@ class AgentMcpServerTests {
             assertEquals(List.of("fake__read_thing"), names(client));
             assertEquals("read_thing saw Bearer agent-tok", text(client.callTool(new CallToolRequest("fake__read_thing", Map.of()))),
                     "the agent token is what gets forwarded, so a downstream server sees the owner");
+            // The 30-day token buys no more than the row allows: READ lists, and a write is refused before it is forwarded.
+            CallToolResult refused = client.callTool(new CallToolRequest("fake__write_thing", Map.of()));
+            assertTrue(Boolean.TRUE.equals(refused.isError()));
+            assertEquals("denied: needs WRITE on server 'fake' (has READ)", text(refused));
+            assertEquals(List.of("read_thing"), CALLS);
         }
 
         // The agent token names its agent, so plain /mcp works with it.

@@ -120,10 +120,19 @@ public class AccountService {
      * Resolves a token to the account it names, or empty if it does not check out. The account is re-read rather
      * than taken from the token's claims, so a rename shows up straight away instead of at the next login, and
      * a suspension or a revocation bites on the very next request.
+     *
+     * <p>An agent token is 403, not an account: its only way in is {@code /mcp} through agent-service, and here
+     * it could edit its owner's email and password. Judged after validity, so a dead one is still a plain 401.
      */
     public Optional<Account> byToken(String token) {
         return tokens.claimsFrom(token).flatMap(claims -> accounts.findById(claims.accountId())
-                .filter(account -> !account.isSuspended() && account.getTokenVersion() == claims.version()));
+                .filter(account -> !account.isSuspended() && account.getTokenVersion() == claims.version())
+                .map(account -> {
+                    if (claims.agent()) {
+                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "an agent token can only connect to /mcp");
+                    }
+                    return account;
+                }));
     }
 
     /** A token for the account, stamped with its current version so a later revocation can kill it. */
