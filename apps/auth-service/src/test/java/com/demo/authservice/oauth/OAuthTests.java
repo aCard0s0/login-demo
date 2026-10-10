@@ -1,7 +1,7 @@
 package com.demo.authservice.oauth;
 
-import com.demo.authservice.account.Account;
-import com.demo.authservice.account.AccountService;
+import com.demo.authservice.user.entities.User;
+import com.demo.authservice.user.UserService;
 import com.demo.authservice.session.SessionService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
@@ -48,7 +48,7 @@ class OAuthTests {
     MockMvc mvc;
 
     @Autowired
-    AccountService accounts;
+    UserService users;
 
     @Autowired
     SessionService sessions;
@@ -113,20 +113,20 @@ class OAuthTests {
     }
 
     @Test
-    void aProviderIdentityFindsTheAccountWithThatEmailOrMakesOne() throws Exception {
-        Account existing = accounts.register("Ada", "ada@example.com", "correct-horse");
+    void aProviderIdentityFindsTheUserWithThatEmailOrMakesOne() throws Exception {
+        User existing = users.register("Ada", "ada@example.com", "correct-horse");
 
-        assertEquals(existing.getId(), accounts.findOrCreateFromOAuth("ADA@example.com", "Ada L").getId(),
-                "a verified provider email must land on the account that already owns it, not a second one");
-        assertEquals("Ada", accounts.findOrCreateFromOAuth("ada@example.com", "Ada L").getName(),
-                "and must not overwrite what the account owner set here");
+        assertEquals(existing.getId(), users.findOrCreateFromOAuth("ADA@example.com", "Ada L").getId(),
+                "a verified provider email must land on the user that already owns it, not a second one");
+        assertEquals("Ada", users.findOrCreateFromOAuth("ada@example.com", "Ada L").getName(),
+                "and must not overwrite what the user set here");
 
-        Account made = accounts.findOrCreateFromOAuth("grace@example.com", null);
+        User made = users.findOrCreateFromOAuth("grace@example.com", null);
         assertEquals("grace", made.getName(), "a provider with no name to give falls back to the address");
-        assertEquals(made.getId(), accounts.findOrCreateFromOAuth("grace@example.com", null).getId(),
-                "a second sign-in is the same account");
+        assertEquals(made.getId(), users.findOrCreateFromOAuth("grace@example.com", null).getId(),
+                "a second sign-in is the same user");
 
         assertTrue(sessions.login("grace@example.com", "").isEmpty(),
-                "an account made this way must have no password anyone can guess");
+                "a user made this way must have no password anyone can guess");
     }
 }

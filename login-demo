@@ -292,14 +292,14 @@ cmd_verify() {
   no_args "$@"
   have curl || die "curl is not on PATH — verify talks to the stack over real HTTP" 3
   local base="http://localhost:$PORT" email pass token todos id todo
-  if [ -n "$DRY_RUN" ]; then note "+ would register an account and write a todo, a bank account and an agent against $base"; return 0; fi
+  if [ -n "$DRY_RUN" ]; then note "+ would sign up a user and write a todo, a bank account and an agent against $base"; return 0; fi
 
   curl -fsS -o /dev/null "$base/api/public/stats" 2>/dev/null \
     || die "nothing is answering on $base — start the stack with ./$PROG start" 4
 
   email="verify-$(date +%s)@example.invalid"; pass="verify-password"
   step "registering $email"
-  curl -fsS -o /dev/null -X POST "$base/api/accounts" -H 'content-type: application/json' \
+  curl -fsS -o /dev/null -X POST "$base/api/users" -H 'content-type: application/json' \
     -d "{\"name\":\"verify\",\"email\":\"$email\",\"password\":\"$pass\"}" \
     || die "register was refused — auth-service or the database is unhappy" 1
 
@@ -308,8 +308,8 @@ cmd_verify() {
     | sed -E 's/.*"token":"([^"]+)".*/\1/') || die "login was refused" 1
   case "$token" in *.*.*) ;; *) die "login did not come back with a three-part JWT" 1 ;; esac
 
-  step "reading the account back"
-  curl -fsS -o /dev/null "$base/api/accounts/me" -H "Authorization: Bearer $token" \
+  step "reading the user back"
+  curl -fsS -o /dev/null "$base/api/users/me" -H "Authorization: Bearer $token" \
     || die "auth-service would not accept the token it had just issued" 1
 
   step "writing a todo"
@@ -377,9 +377,9 @@ cmd_verify() {
     | sed -E 's/.*"token":"([^"]+)".*/\1/') || die "agent-service could not get a token from auth-service" 1
   case "$atoken" in *.*.*) ;; *) die "the agent token did not come back as a three-part JWT: $atoken" 1 ;; esac
   # An agent token opens /mcp and nothing else. Over REST it would skip agent-service's READ/WRITE check: a READ
-  # agent could DELETE a todo with its 30-day token, or edit its owner's account. Every service must say 403.
+  # agent could DELETE a todo with its 30-day token, or edit its owner's profile. Every service must say 403.
   local code probe
-  for probe in "GET /api/todos" "DELETE /api/todos/$todo" "GET /api/accounts/me" "GET /api/bank/accounts" "GET /api/agents"; do
+  for probe in "GET /api/todos" "DELETE /api/todos/$todo" "GET /api/users/me" "GET /api/bank/accounts" "GET /api/agents"; do
     code=$(curl -sS -o /dev/null -w '%{http_code}' -X "${probe%% *}" "$base${probe#* }" -H "Authorization: Bearer $atoken") || true
     [ "$code" = 403 ] || die "$probe answered the agent token with $code, not 403 -- an agent bypassed the MCP gate" 1
   done

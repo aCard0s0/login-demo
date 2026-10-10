@@ -46,7 +46,7 @@ class JwtVerifierTests {
             Instant later = Instant.now().plusSeconds(300);
 
             Caller caller = verifier.callerOf("Bearer " + token(advertised, "42", later, "MODERATOR"));
-            assertEquals("42", caller.accountId());
+            assertEquals("42", caller.userId());
             assertEquals("MODERATOR", caller.role());
             assertTrue(caller.readsEveryone());
             assertFalse(caller.writesEveryone(), "only an admin writes everyone");
@@ -77,7 +77,7 @@ class JwtVerifierTests {
                     "a token from before the agent's own revocation must not be accepted");
             assertEquals(10L, verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, 10L, 0)).agentId(),
                     "revoking one agent must not touch another's");
-            assertEquals("42", verifier.callerOf("Bearer " + token(advertised, "42", later, "USER")).accountId(),
+            assertEquals("42", verifier.callerOf("Bearer " + token(advertised, "42", later, "USER")).userId(),
                     "nor the owner's login token");
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "42", later, "AGENT", null, 10L, null)),
                     "an agent token minted before agentVer existed cannot be told from a revoked one, so it is refused");
@@ -88,15 +88,15 @@ class JwtVerifierTests {
             assertThrows(ResponseStatusException.class,
                     () -> verifier.callerOf("Bearer " + token(advertised, "42", Instant.now().minusSeconds(300), "USER")),
                     "an expired token must not be accepted");
-            // Account 7 was revoked up to version 2: older tokens die, that one and anything newer live.
+            // User 7 was revoked up to version 2: older tokens die, that one and anything newer live.
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 1)),
-                    "a token from before the account's last revocation must not be accepted");
+                    "a token from before the user's last revocation must not be accepted");
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "7", later, "USER")),
                     "a token with no version is version zero");
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer " + token(advertised, "7", later, "AGENT", 1, 9L, 1)),
                     "revoking the owner kills their agents' tokens too");
-            assertEquals("7", verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 2)).accountId());
-            assertEquals("7", verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 3)).accountId(),
+            assertEquals("7", verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 2)).userId());
+            assertEquals("7", verifier.callerOf("Bearer " + token(advertised, "7", later, "USER", 3)).userId(),
                     "a token newer than the last revocation heard of is fine");
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf(null));
             assertThrows(ResponseStatusException.class, () -> verifier.callerOf("Bearer not.a.token"));

@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * One agent, owned by the id of the account that created it, with the MCP servers it may use. The servers
+ * One agent, owned by the id of the user that created it, with the MCP servers it may use. The servers
  * live inside the agent rather than behind their own repository, so the one owner check on the agent covers
  * them too.
  */

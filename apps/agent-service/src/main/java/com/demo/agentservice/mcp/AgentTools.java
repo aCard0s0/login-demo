@@ -31,7 +31,7 @@ import static com.demo.mcp.server.McpEndpoint.schema;
  * between two calls like it does for MCP servers.
  *
  * <p>Every tool goes through {@link AgentService} as the owner, so the owner rules are the same ones the REST
- * API enforces and another account's agent is "not found" here too. An agent may never change its own
+ * API enforces and another user's agent is "not found" here too. An agent may never change its own
  * configuration: with that door open, one call to {@code set_mcp_access} would be all the escalation it takes.
  */
 class AgentTools {

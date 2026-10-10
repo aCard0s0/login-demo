@@ -1,6 +1,6 @@
 package com.demo.authservice.session;
 
-import com.demo.authservice.account.Account;
+import com.demo.authservice.user.entities.User;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,7 +20,7 @@ public class SessionController {
     public LoginResponse login(@RequestBody LoginRequest req) {
         Session session = sessions.login(req.email(), req.password())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid credentials"));
-        Account account = session.account();
-        return new LoginResponse(session.token(), account.getName(), account.getEmail(), account.getRole());
+        User user = session.user();
+        return new LoginResponse(session.token(), user.getName(), user.getEmail(), user.getRole());
     }
 }

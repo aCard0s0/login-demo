@@ -19,7 +19,7 @@ public class TodoService {
         this.todos = todos;
     }
 
-    /** How many todos exist across every account. Public: a total gives away nobody's list. */
+    /** How many todos exist across every user. Public: a total gives away nobody's list. */
     public long count() {
         return todos.count();
     }
@@ -28,12 +28,12 @@ public class TodoService {
     public List<Todo> list(Caller caller) {
         return caller.readsEveryone()
                 ? todos.findAllByOrderByIdAsc()
-                : todos.findByOwnerOrderByIdAsc(caller.accountId());
+                : todos.findByOwnerOrderByIdAsc(caller.userId());
     }
 
     /** A todo is always created for the caller, whatever their role: there is no "add this to someone else". */
     public Todo add(Caller caller, String title) {
-        return todos.save(new Todo(caller.accountId(), cleanTitle(title)));
+        return todos.save(new Todo(caller.userId(), cleanTitle(title)));
     }
 
     @Transactional
@@ -72,7 +72,7 @@ public class TodoService {
      * todo exists.
      */
     private Todo writable(Caller caller, Long id) {
-        return (caller.writesEveryone() ? todos.findById(id) : todos.findByIdAndOwner(id, caller.accountId()))
+        return (caller.writesEveryone() ? todos.findById(id) : todos.findByIdAndOwner(id, caller.userId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
     }
 

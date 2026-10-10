@@ -1,6 +1,6 @@
 # auth-service
 
-Accounts, login, roles, and the RS256 keypair every other service verifies against. Port **9081**.
+Users, login, roles, and the RS256 keypair every other service verifies against. Port **9081**.
 
 It is the only service that writes to the `auth` database, and the only holder of the private signing key.
 Nothing here calls todo-service; the traffic goes the other way, and only for the public key.
@@ -11,8 +11,9 @@ Split by subject rather than by layer -- one package holds its entity, service, 
 together, so a change to one subject stays in one folder.
 
 ```
-account/  Account  Role  AccountRepository  AccountService  AccountController  AdminSeeder
-          AccountResponse  NewAccount  UpdateAccount  RoleChange
+user/     UserService  UserController  AdminSeeder  AgentTokenController  TokenVersionController
+  entities/  User  Role  UserRepository  AgentTokenVersion  AgentTokenVersionRepository
+  dto/       UserResponse  NewUser  UpdateUser  RoleChange  Suspension
 session/  Session  SessionService  SessionController  LoginRequest  LoginResponse
 token/    Tokens  JwksController
 oauth/    OAuthProvider  OAuthProperties  OAuthService  OAuthController
@@ -20,44 +21,44 @@ stats/    StatsController  PublicStats
 support/  AuthExceptionAdvice  AttemptWindow  TooManyAttemptsException
 ```
 
-The dependencies point one way: `token` <- `account` <- {`session`, `oauth`} -- the two ways in, neither
-knowing about the other. `Tokens.issue` takes an id, an email, a name and a role rather than an `Account`,
-which is what keeps `token` free of the account package. `stats` is the unauthenticated corner, kept apart
+The dependencies point one way: `token` <- `user` <- {`session`, `oauth`} -- the two ways in, neither
+knowing about the other. `Tokens.issue` takes an id, an email, a name and a role rather than a `User`,
+which is what keeps `token` free of the user package. `stats` is the unauthenticated corner, kept apart
 so the trust boundary shows up in the tree.
 
 ## Roles
 
-The role lives on the account row, stored as its name (`@Enumerated(EnumType.STRING)`) so reordering the
+The role lives on the user row, stored as its name (`@Enumerated(EnumType.STRING)`) so reordering the
 enum cannot silently re-grade anybody. See the [root README](../../README.md#roles) for the matrix that
 spans both services; what *this* service enforces is:
 
 | Endpoint | ADMIN | MODERATOR | AGENT | USER |
 |---|---|---|---|---|
-| `GET /api/accounts/me` | own | own | 403 | own |
-| `PUT /api/accounts/me` | own | own | 403 | own |
-| `GET /api/accounts` | everyone | everyone | 403 | 403 |
-| `PUT /api/accounts/{id}/role` | any account | 403 | 403 | 403 |
-| `PUT /api/accounts/{id}/suspended` · `POST /api/accounts/{id}/revoke` | any account | 403 | 403 | 403 |
+| `GET /api/users/me` | own | own | 403 | own |
+| `PUT /api/users/me` | own | own | 403 | own |
+| `GET /api/users` | everyone | everyone | 403 | 403 |
+| `PUT /api/users/{id}/role` | any user | 403 | 403 | 403 |
+| `PUT /api/users/{id}/suspended` · `POST /api/users/{id}/revoke` | any user | 403 | 403 | 403 |
 
-Registration always produces a `USER`: `POST /api/accounts` has no role field to ask with, and
-`PUT /api/accounts/me` cannot change one. `PUT /api/accounts/{id}/role` is the single door off `USER`.
+Registration always produces a `USER`: `POST /api/users` has no role field to ask with, and
+`PUT /api/users/me` cannot change one. `PUT /api/users/{id}/role` is the single door off `USER`.
 
 Two rules worth knowing:
 
 - **An admin cannot demote itself.** The last one doing so would leave nobody able to promote anybody ever
-  again, so `AccountService.changeRole` refuses it rather than trusting whoever writes the next controller.
-- **The role is read from the account row, not from the token's claims.** A promotion or demotion takes
+  again, so `UserService.changeRole` refuses it rather than trusting whoever writes the next controller.
+- **The role is read from the user row, not from the token's claims.** A promotion or demotion takes
   effect on the next request, on a token the holder already has. (todo-service is the opposite -- see its
   README for why.)
 
 An **agent token** -- the `AGENT` role, minted for one of a user's agents -- is 403 on every endpoint here,
-`GET /api/accounts/me` included. Its only way in is `/mcp` through agent-service; let in here it could change
-its owner's email and password with a 30-day token. `AccountService.byToken` refuses it after checking it is
+`GET /api/users/me` included. Its only way in is `/mcp` through agent-service; let in here it could change
+its owner's email and password with a 30-day token. `UserService.byToken` refuses it after checking it is
 otherwise valid, so a revoked or expired agent token is still a plain 401 and says nothing more.
 
-An admin changing *another* account's name, email or password is deliberately not implemented:
-`PUT /api/accounts/me` requires the current password even to change only the name, and admin-bypassing that
-would be account takeover rather than administration.
+An admin changing *another* user's name, email or password is deliberately not implemented:
+`PUT /api/users/me` requires the current password even to change only the name, and admin-bypassing that
+would be impersonation rather than administration.
 
 ### The seeded admin
 
@@ -67,12 +68,12 @@ Compose passes both in from `.env` and refuses to start without them; `./mvnw te
 
 Seeding is **create-only**. If the address already exists it is promoted, but its password is left exactly
 as it is -- so a restart cannot quietly reset a password the admin has since changed, and a stale `.env`
-cannot hand the account back to whoever last read that file.
+cannot hand the user back to whoever last read that file.
 
 It lives here rather than in `docker/initdb.sql` with the rest of the database setup because the password
 has to be BCrypt hashed the way this service does it, and SQL cannot.
 
-## Accounts and passwords
+## Users and passwords
 
 BCrypt via `spring-security-crypto` -- the full security starter would install a filter chain that would
 then have to be switched off. Only the hash is stored.
@@ -82,9 +83,9 @@ then have to be switched off. Only the hash is stored.
   behind the user's back.
 - Names and emails are at most 255 characters, the width of the column. Checked here so Postgres does not
   answer the overflow with a misleading "already registered".
-- Emails are lowercased and must be unique. The unique index on `accounts.email` is the real guard, so two
+- Emails are lowercased and must be unique. The unique index on `users.email` is the real guard, so two
   simultaneous registrations still come back as a 400 rather than a 500.
-- A login for an unknown email still runs one hash comparison against a dummy hash, so a missing account
+- A login for an unknown email still runs one hash comparison against a dummy hash, so a missing user
   costs the same time as a wrong password.
 - Five failed logins for one email inside 15 minutes lock that email out with a 429, correct password
   included. Per email rather than per IP, because every browser request arrives from the Node proxy and
@@ -93,8 +94,8 @@ then have to be switched off. Only the hash is stored.
 - Registration is capped at 30 attempts per 15 minutes, service-wide, and answers 429 past that. Service-wide
   rather than per client because every request arrives from the Node proxy under one address and the proxy
   sets no `X-Forwarded-For`; the trade is that a run of bots makes honest registrations wait the window out.
-- Editing an account always requires the current password, even to change only the name, so a borrowed tab
-  cannot quietly take an account over.
+- Editing a user always requires the current password, even to change only the name, so a borrowed tab
+  cannot quietly take a user over.
 
 ## Signing in with Google or GitHub
 
@@ -112,11 +113,11 @@ GET /api/oauth/google/callback   code -> access token -> verified email -> our o
 
 The things worth knowing:
 
-- **An account is matched by verified email and nothing else.** That is what makes "continue with Google"
-  and "log in with a password" the same account rather than two, and why an unverified address is refused:
-  accepting one would let anyone who can claim an address at a provider walk into the account that already
+- **A user is matched by verified email and nothing else.** That is what makes "continue with Google"
+  and "log in with a password" the same user rather than two, and why an unverified address is refused:
+  accepting one would let anyone who can claim an address at a provider walk into the user that already
   owns it here. Google states `email_verified`; GitHub says nothing on `/user`, and hides the address
-  entirely when the account keeps it private, so the address always comes from `/user/emails` where the
+  entirely when the GitHub user keeps it private, so the address always comes from `/user/emails` where the
   `primary` and `verified` flags live.
 - **The callback is guarded by a state cookie**, planted on the way out and required to match the `state`
   the provider echoes back. An attacker can make a browser visit the callback but cannot set a cookie on
@@ -128,10 +129,10 @@ The things worth knowing:
 - **The token comes back in the URL fragment**, not the query string, so it is never sent to a server,
   written to the proxy's access log, or passed on in a `Referer` header. The login page reads it, stores it
   the same way a password login does, and clears the fragment.
-- **An account created this way has no usable password** -- the column holds a hash of a value nobody
+- **A user created this way has no usable password** -- the column holds a hash of a value nobody
   holds, rather than being nullable and making every password path test for it. The consequence is that its
-  owner cannot use `/account`, which asks for a current password. A "set a password" flow is the upgrade;
-  it is marked in `AccountService` and is not built.
+  owner cannot use `/profile`, which asks for a current password. A "set a password" flow is the upgrade;
+  it is marked in `UserService` and is not built.
 - **Every call to a provider is bounded** at 10 seconds to connect and 10 to answer, so a provider that
   hangs costs one failed sign-in and not a request thread for good.
 - **A disabled provider answers 404**, the same as an unknown one. Which providers a deployment configured
@@ -229,23 +230,23 @@ restart rather than an outage.
 ## Tokens
 
 An RSA keypair is generated at startup and never written to disk. Tokens are RS256 JWTs carrying `sub`
-(the account id), `email`, `name`, `role`, `ver` (the account's token version), `iat` and `exp`. An agent
+(the user id), `email`, `name`, `role`, `ver` (the user's token version), `iat` and `exp`. An agent
 token adds `agent` (the one agent it is pinned to) and `agentVer` (that agent's own token version, see
 below). The public half is published at `/api/jwks.json` with a `kid`, so a second key can be added later
 without breaking anything.
 
 Two token versions, both kept here because this is where tokens are minted and where the feed the other
-services poll is served. The account's `tokenVersion` is bumped by an admin's revoke or suspend and kills
-every token the account holds. An agent's `AgentTokenVersion` row is bumped by its owner, through
+services poll is served. The user's `tokenVersion` is bumped by an admin's revoke or suspend and kills
+every token the user holds. An agent's `AgentTokenVersion` row is bumped by its owner, through
 agent-service and `POST /internal/agent-tokens/{agentId}/revoke`, and kills that one agent's tokens alone.
-`/internal/token-versions` publishes both in one map, accounts by id and agents as `agent:<id>`, so the two
+`/internal/token-versions` publishes both in one map, users by id and agents as `agent:<id>`, so the two
 kinds of key cannot collide. The services require `agentVer` on every agent token: one minted before the
 claim existed cannot be told from one revoked since, so it is refused.
 
-The id is the subject because it is the one thing about an account that never changes; a rename or a new
+The id is the subject because it is the one thing about a user that never changes; a rename or a new
 email does not orphan anything that points at it.
 
-A restart mints a new keypair and so invalidates every token in flight. Accounts are untouched. There is no
+A restart mints a new keypair and so invalidates every token in flight. Users are untouched. There is no
 logout endpoint to pair with any of this: a signed token is good until it expires, so logging out is the
 client dropping the token it holds, and `auth.token-ttl` is the real bound.
 
@@ -253,21 +254,21 @@ client dropping the token it holds, and `auth.token-ttl` is the real bound.
 
 | Method | Path | Body / notes |
 |---|---|---|
-| POST | `/api/accounts` | `{name, email, password}` -> 201 `{id, name, email, role}`, always `USER`; 429 past the cap |
+| POST | `/api/users` | `{name, email, password}` -> 201 `{id, name, email, role}`, always `USER`; 429 past the cap |
 | POST | `/api/login` | `{email, password}` -> `{token, name, email, role}`, 401, or 429 once locked out |
-| GET | `/api/accounts/me` | the caller's own account; an agent token is 403 |
-| PUT | `/api/accounts/me` | `{name, email, currentPassword, newPassword?}`; an agent token is 403 |
-| GET | `/api/accounts` | everyone -- admin and moderator only, else 403 |
-| PUT | `/api/accounts/{id}/role` | `{role}` -- admin only, else 403 |
-| PUT | `/api/accounts/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |
-| POST | `/api/accounts/{id}/revoke` | no body -- admin only; kills every token the account holds |
-| GET | `/internal/token-versions` | `{"<accountId>": version, "agent:<agentId>": version}` for every revoked account and agent; todo-, agent- and account-service poll it |
+| GET | `/api/users/me` | the caller themselves; an agent token is 403 |
+| PUT | `/api/users/me` | `{name, email, currentPassword, newPassword?}`; an agent token is 403 |
+| GET | `/api/users` | everyone -- admin and moderator only, else 403 |
+| PUT | `/api/users/{id}/role` | `{role}` -- admin only, else 403 |
+| PUT | `/api/users/{id}/suspended` | `{suspended}` -- admin only; suspending also revokes; not on yourself |
+| POST | `/api/users/{id}/revoke` | no body -- admin only; kills every token the user holds |
+| GET | `/internal/token-versions` | `{"<userId>": version, "agent:<agentId>": version}` for every revoked user and agent; todo-, agent- and account-service poll it |
 | POST | `/internal/agent-tokens` | `{accountId, agentId}` -> `{token}`: a 30-day `AGENT` token for one agent, stamped with its `agentVer`; agent-service asks, with `X-Internal-Secret`, else 403 |
 | POST | `/internal/agent-tokens/{agentId}/revoke` | -> `{version}`: bumps that agent's version, killing every token minted for it; same secret, else 403 |
 | GET | `/api/oauth/providers` | `[{key, label}]` -- the configured providers, no token |
 | GET | `/api/oauth/{provider}/start` | 302 to consent, or 404 if that provider is off -- no token |
 | GET | `/api/oauth/{provider}/callback` | 302 to `/login#token=...&name=...&role=...` or `/login#error=...` -- no token |
-| GET | `/api/public/stats` | `{accounts}` -- no token |
+| GET | `/api/public/stats` | `{users}` -- no token |
 | GET | `/api/jwks.json` | the public signing key -- no token |
 
 Everything except the bottom five needs `Authorization: Bearer <token>`. Every rejection comes back as
@@ -300,7 +301,7 @@ docker compose up -d db                  # it still needs a database
 ./mvnw -pl apps/auth-service test        # SQLite backed: needs nothing running
 ```
 
-Tests: `AccountServiceTests` and `SessionServiceTests` for the rules, `ApiContractTests` for the HTTP
+Tests: `UserServiceTests` and `SessionServiceTests` for the rules, `ApiContractTests` for the HTTP
 contract the frontend and todo-service are written against -- status codes, the `{error}` shape, the
 `Authorization` header, and the seeded admin. `OAuthTests` covers the half of the provider flow that needs
 no provider: which buttons a deployment offers, where the browser is sent, and what a callback that did not

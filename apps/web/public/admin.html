@@ -15,13 +15,13 @@
     <p class="ok" id="done"></p>
     <div class="table-wrap" id="list" hidden>
       <table>
-        <thead><tr><th>Account</th><th>Role</th><th>Status</th><th></th></tr></thead>
-        <tbody id="accounts"></tbody>
+        <thead><tr><th>User</th><th>Role</th><th>Status</th><th></th></tr></thead>
+        <tbody id="users"></tbody>
       </table>
     </div>
 
     <p class="note">
-      <b>Suspend</b> stops an account logging in and kills every token it holds, until it is reactivated.
+      <b>Suspend</b> stops a user logging in and kills every token it holds, until it is reactivated.
       <b>Revoke access</b> signs it out everywhere; it can log straight back in. Both bite at once in
       auth-service and within ten seconds in todo-service, which checks tokens itself.
     </p>
@@ -44,10 +44,10 @@ const cell = (...children) => {
 
 const render = async () => {
   const me = String(claims().sub);
-  const accounts = await api('/api/accounts');
-  $('accounts').replaceChildren(...accounts.map((a) => {
+  const users = await api('/api/users');
+  $('users').replaceChildren(...users.map((a) => {
     const tr = document.createElement('tr');
-    // textContent throughout: names and emails are whatever each account owner typed.
+    // textContent throughout: names and emails are whatever each user typed.
     const who = cell(a.name, Object.assign(document.createElement('small'), { textContent: a.email }));
     const status = Object.assign(document.createElement('span'), {
       className: `badge ${a.suspended ? 'suspended' : 'active'}`,
@@ -61,13 +61,13 @@ const render = async () => {
       actions.append(
         a.suspended
           ? button('Reactivate', 'reactivate', () => act(`Reactivate ${a.email}?`,
-              () => api(`/api/accounts/${a.id}/suspended`, { method: 'PUT', body: JSON.stringify({ suspended: false }) }),
+              () => api(`/api/users/${a.id}/suspended`, { method: 'PUT', body: JSON.stringify({ suspended: false }) }),
               `${a.email} reactivated.`))
           : button('Suspend', 'suspend', () => act(`Suspend ${a.email}? They are signed out and cannot log in until reactivated.`,
-              () => api(`/api/accounts/${a.id}/suspended`, { method: 'PUT', body: JSON.stringify({ suspended: true }) }),
+              () => api(`/api/users/${a.id}/suspended`, { method: 'PUT', body: JSON.stringify({ suspended: true }) }),
               `${a.email} suspended.`)),
         button('Revoke access', 'logout', () => act(`Sign ${a.email} out everywhere?`,
-          () => api(`/api/accounts/${a.id}/revoke`, { method: 'POST' }),
+          () => api(`/api/users/${a.id}/revoke`, { method: 'POST' }),
           `${a.email} signed out everywhere.`)),
       );
     }

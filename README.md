@@ -158,10 +158,10 @@ Endpoint by endpoint:
 
 | Service | Endpoint | ADMIN | MODERATOR | AGENT | USER |
 |---|---|---|---|---|---|
-| auth | `GET`/`PUT /api/accounts/me` | own | own | 403 | own |
-| auth | `GET /api/accounts` | everyone | everyone | 403 | 403 |
-| auth | `PUT /api/accounts/{id}/role` | any account | 403 | 403 | 403 |
-| auth | `PUT /api/accounts/{id}/suspended` · `POST /api/accounts/{id}/revoke` | any account | 403 | 403 | 403 |
+| auth | `GET`/`PUT /api/users/me` | own | own | 403 | own |
+| auth | `GET /api/users` | everyone | everyone | 403 | 403 |
+| auth | `PUT /api/users/{id}/role` | any account | 403 | 403 | 403 |
+| auth | `PUT /api/users/{id}/suspended` · `POST /api/users/{id}/revoke` | any account | 403 | 403 | 403 |
 | todo | `GET /api/todos` | everyone's | everyone's | 403; over MCP its owner's | own |
 | todo | `POST /api/todos` | own | own | 403; over MCP its owner's, if WRITE | own |
 | todo | `PUT`/`PATCH`/`DELETE /api/todos/{id}` | anyone's | own, else 404 | 403; over MCP its owner's, if WRITE | own |
@@ -180,8 +180,8 @@ todo-service and account-service are the one place an agent token is good, and o
 them. The endpoints that take no token at all -- registration, login, the OAuth redirects, `/api/public/*`,
 `/api/jwks.json` -- are unaffected, since there is no token to refuse.
 
-Registration always produces a `USER` -- `POST /api/accounts` has no role field to ask with, and
-`PUT /api/accounts/me` cannot change one. `PUT /api/accounts/{id}/role` is the single door off `USER`, and
+Registration always produces a `USER` -- `POST /api/users` has no role field to ask with, and
+`PUT /api/users/me` cannot change one. `PUT /api/users/{id}/role` is the single door off `USER`, and
 only an admin may open it. An admin cannot demote itself, because the last one doing so would leave nobody
 able to promote anybody ever again.
 
@@ -317,13 +317,13 @@ The consequences worth knowing:
 
 | Service | Method | Path | Token |
 |---|---|---|---|
-| auth | POST | `/api/accounts` | no -- this is registration |
+| auth | POST | `/api/users` | no -- this is registration |
 | auth | POST | `/api/login` | no |
-| auth | GET · PUT | `/api/accounts/me` | yes -- user tokens only; an agent token is 403 on all of `/api/accounts` |
-| auth | GET | `/api/accounts` | yes -- admin and moderator only |
-| auth | PUT | `/api/accounts/{id}/role` | yes -- admin only |
-| auth | PUT | `/api/accounts/{id}/suspended` | yes -- admin only |
-| auth | POST | `/api/accounts/{id}/revoke` | yes -- admin only |
+| auth | GET · PUT | `/api/users/me` | yes -- user tokens only; an agent token is 403 on all of `/api/users` |
+| auth | GET | `/api/users` | yes -- admin and moderator only |
+| auth | PUT | `/api/users/{id}/role` | yes -- admin only |
+| auth | PUT | `/api/users/{id}/suspended` | yes -- admin only |
+| auth | POST | `/api/users/{id}/revoke` | yes -- admin only |
 | auth | GET | `/internal/token-versions` | no -- compose network only, never proxied; accounts by id, agents as `agent:<id>` |
 | auth | POST | `/internal/agent-tokens` · `/internal/agent-tokens/{agentId}/revoke` | `X-Internal-Secret` -- compose network only, never proxied; agent-service asks |
 | auth | GET | `/api/oauth/providers` | no |

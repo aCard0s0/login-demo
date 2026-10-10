@@ -265,7 +265,7 @@ class AgentMcpServerTests {
             String listed = text(client.callTool(new CallToolRequest("list_agents", Map.of())));
             assertTrue(listed.contains("#" + sibling.getId() + " sibling (others: NONE, 1 servers)"), listed);
             assertFalse(listed.contains("#" + agent.getId() + " "), "the agent does not list itself: " + listed);
-            assertFalse(listed.contains("not yours"), "another account's agent must never show");
+            assertFalse(listed.contains("not yours"), "another user's agent must never show");
             CallToolResult theirs = client.callTool(new CallToolRequest("get_agent", Map.of("id", stranger.getId())));
             assertTrue(Boolean.TRUE.equals(theirs.isError()));
             assertEquals("no such agent", text(theirs));
@@ -318,7 +318,7 @@ class AgentMcpServerTests {
             assertEquals(List.of("fake__read_thing"), names(client));
         }
 
-        // An agent token for another agent, another account, no token, a login token with no agent id: each refused, nothing learned.
+        // An agent token for another agent, another user, no token, a login token with no agent id: each refused, nothing learned.
         pinned = other.getId();
         assertRefused(() -> connect("agent-tok", agent.getId()), "no such agent");
         assertRefused(() -> connect("tok-101", agent.getId()), "no such agent");

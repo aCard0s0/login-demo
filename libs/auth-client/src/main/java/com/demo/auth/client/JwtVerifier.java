@@ -47,7 +47,7 @@ public class JwtVerifier {
         String token = authorization == null ? "" : authorization.replaceFirst("(?i)^Bearer ", "");
         try {
             JWTClaimsSet claims = jwt.process(token, null);
-            // A token older than the account's last revocation is dead, however good its signature.
+            // A token older than the user's last revocation is dead, however good its signature.
             // At least rather than equal: a token minted after a revocation we have not heard of yet is fine.
             Long version = claims.getLongClaim("ver");
             if ((version == null ? 0 : version) < revocations.minimumVersion(claims.getSubject())) {

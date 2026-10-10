@@ -1,6 +1,6 @@
 package com.demo.authservice.session;
 
-import com.demo.authservice.account.AccountService;
+import com.demo.authservice.user.UserService;
 import com.demo.authservice.support.TooManyAttemptsException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,14 +23,14 @@ class SessionServiceTests {
     SessionService sessions;
 
     @Autowired
-    AccountService accounts;
+    UserService users;
 
     @Test
     void logsInWithTheRightPasswordAndNothingElse() {
-        accounts.register("Ada", "ada@example.com", "correct-horse");
+        users.register("Ada", "ada@example.com", "correct-horse");
 
         assertEquals("ada@example.com",
-                sessions.login("ada@example.com", "correct-horse").orElseThrow().account().getEmail());
+                sessions.login("ada@example.com", "correct-horse").orElseThrow().user().getEmail());
         assertTrue(sessions.login("ada@example.com", "wrong").isEmpty());
         assertTrue(sessions.login("nobody@example.com", "correct-horse").isEmpty(),
                 "an unknown email must fail the same way a wrong password does");
@@ -38,8 +38,8 @@ class SessionServiceTests {
 
     @Test
     void aNewPasswordWorksAndTheOldOneStopsWorking() {
-        var edna = accounts.register("Edna", "edna@example.com", "edna-pass-01");
-        accounts.update(edna.getId(), "Edna Mode", "edna.mode@example.com", "edna-pass-01", "new-pass-007");
+        var edna = users.register("Edna", "edna@example.com", "edna-pass-01");
+        users.update(edna.getId(), "Edna Mode", "edna.mode@example.com", "edna-pass-01", "new-pass-007");
 
         assertTrue(sessions.login("edna.mode@example.com", "new-pass-007").isPresent(), "the new password must work");
         assertTrue(sessions.login("edna.mode@example.com", "edna-pass-01").isEmpty(), "the old password must not");
@@ -47,7 +47,7 @@ class SessionServiceTests {
 
     @Test
     void locksAnEmailOutAfterARunOfFailedLogins() {
-        accounts.register("Katherine", "katherine@example.com", "johnson-1918");
+        users.register("Katherine", "katherine@example.com", "johnson-1918");
 
         for (int attempt = 0; attempt < 5; attempt++) {
             assertTrue(sessions.login("katherine@example.com", "wrong").isEmpty());

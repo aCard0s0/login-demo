@@ -18,17 +18,17 @@
         <button data-icon="login">Log in</button>
       </form>
       <p class="error" id="login-error"></p>
-      <p><small>No account? <button class="link" id="to-register">Create one</button></small></p>
+      <p><small>New here? <button class="link" id="to-register">Sign up</button></small></p>
     </section>
 
     <section id="register-view" hidden>
-      <h1>Create an account</h1>
+      <h1>Sign up</h1>
       <form id="register-form">
         <input id="register-name" placeholder="name" autocomplete="name" required>
         <input id="register-email" type="email" placeholder="email" autocomplete="username" required>
         <input id="register-password" type="password" placeholder="password (8+ characters)"
                autocomplete="new-password" minlength="8" required>
-        <button data-icon="signup">Create account</button>
+        <button data-icon="signup">Sign up</button>
       </form>
       <p class="error" id="register-error"></p>
       <p><small>Already registered? <button class="link" id="to-login">Log in</button></small></p>
@@ -95,7 +95,7 @@ $('register-form').onsubmit = async (e) => {
   const password = $('register-password').value;
   try {
     const body = JSON.stringify({ name: $('register-name').value, email, password });
-    await api('/api/accounts', { method: 'POST', body });
+    await api('/api/users', { method: 'POST', body });
     await signIn(email, password); // straight in, no second trip through the login form
   } catch (err) {
     $('register-error').textContent = err.message;

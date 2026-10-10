@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Every owner-scoped query is scoped in the query itself, so no caller can reach another account's row by
+ * Every owner-scoped query is scoped in the query itself, so no caller can reach another user's row by
  * passing someone else's id. The two unscoped reads exist for the roles that are allowed to see everything,
  * and {@link TodoService} is the only thing that decides which pair a request gets.
  */

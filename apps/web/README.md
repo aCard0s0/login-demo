@@ -11,16 +11,16 @@ minified, so what is in `public/` is what the browser gets.
 | URL | What |
 |---|---|
 | `/` | Landing. The two public counts, no token needed. |
-| `/login` | Log in, create an account, or continue with a configured provider. |
+| `/login` | Log in, sign up, or continue with a configured provider. |
 | `/todos` | Your todos. Bounces to `/login` without a token. |
-| `/account` | Change your name, email or password. |
+| `/profile` | Change your name, email or password. |
 | `/agents` | Your agents: create one, delete one, see each one's servers and access at a glance. |
 | `/agent?id=` | One agent: its instructions, its MCP servers and their READ/WRITE, access to your other agents, how to connect to it, and its activity. |
 | `/bank` | Your money accounts: open one for yourself or an agent, deposit, transfer, grant an agent READ or WRITE, see an account's history. |
-| `/admin` | Admin only: accounts, suspend and revoke. |
+| `/admin` | Admin only: users, suspend and revoke. |
 
 ```
-public/index.html  login.html  todos.html  account.html  agents.html  agent.html  bank.html  admin.html
+public/index.html  login.html  todos.html  profile.html  agents.html  agent.html  bank.html  admin.html
        app.js      token handling, the api() helper, the shared header and sidebar
        style.css
 server.js          the fixed URL map and the /api proxy
@@ -80,10 +80,10 @@ transferring, which it does over MCP.
 
 ## Roles in the UI
 
-An admin gets an **Admin** link in the header and the `/admin` page: every account with its role and status,
-and per account **Suspend** / **Reactivate** and **Revoke access** (sign out everywhere). The link and the
+An admin gets an **Admin** link in the header and the `/admin` page: every user with its role and status,
+and per user **Suspend** / **Reactivate** and **Revoke access** (sign out everywhere). The link and the
 page read the role out of the token only to decide what to draw; every action is refused server-side for
-anyone but an admin. Role changes (`PUT /api/accounts/{id}/role`) and a moderator's wider reads are still
+anyone but an admin. Role changes (`PUT /api/users/{id}/role`) and a moderator's wider reads are still
 API-only. See the [root README](../../README.md#roles) for what the roles actually allow.
 
 ## Configuration

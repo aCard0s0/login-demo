@@ -1,4 +1,4 @@
-package com.demo.authservice.account;
+package com.demo.authservice.user.entities;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -15,11 +15,11 @@ import lombok.Setter;
 
 /** A registered user. The plain password is never stored, only its BCrypt hash. */
 @Entity
-@Table(name = "accounts")
+@Table(name = "users")
 @Getter
 @Setter
 @NoArgsConstructor
-public class Account {
+public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -42,7 +42,7 @@ public class Account {
     @Column(nullable = false, columnDefinition = "varchar(20) default 'USER'")
     private Role role = Role.USER;
 
-    /** A suspended account cannot log in, and every token it already holds stops working. */
+    /** A suspended user cannot log in, and every token it already holds stops working. */
     @Column(nullable = false)
     @ColumnDefault("false")
     private boolean suspended;
@@ -56,8 +56,8 @@ public class Account {
     @ColumnDefault("0")
     private int tokenVersion;
 
-    /** A new account is always a USER; nothing but an admin's say-so moves it off that. */
-    public Account(String name, String email, String passwordHash) {
+    /** A new user is always a USER; nothing but an admin's say-so moves it off that. */
+    public User(String name, String email, String passwordHash) {
         this.name = name;
         this.email = email;
         this.passwordHash = passwordHash;

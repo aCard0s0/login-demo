@@ -57,31 +57,31 @@ public class Tokens {
     }
 
     /**
-     * A signed token naming the account. The id is the subject because it is the one thing that never changes.
+     * A signed token naming the user. The id is the subject because it is the one thing that never changes.
      *
-     * <p>Takes the fields rather than the Account itself, so this package stays free of any dependency on
-     * the account package and the arrow between them only ever points one way. The role rides along as a
+     * <p>Takes the fields rather than the User itself, so this package stays free of any dependency on
+     * the user package and the arrow between them only ever points one way. The role rides along as a
      * plain string: it is what lets todo-service decide what a caller may touch without asking us.
      */
-    public String issue(Long accountId, String email, String name, String role, int version) {
-        return issue(accountId, email, name, role, version, Map.of(), ttl);
+    public String issue(Long userId, String email, String name, String role, int version) {
+        return issue(userId, email, name, role, version, Map.of(), ttl);
     }
 
     /**
-     * A long-lived token for one of the account's agents to connect to agent-service with: the account as
+     * A long-lived token for one of the user's agents to connect to agent-service with: the user as
      * subject, the {@code AGENT} role, and the agent's id as a claim so agent-service can pin it to that one
-     * agent. It carries the account's current token version like any other, so "revoke access" kills it too,
+     * agent. It carries the user's current token version like any other, so "revoke access" kills it too,
      * and the agent's own version as {@code agentVer}, so the owner can kill this one agent's tokens alone.
      */
-    public String issueForAgent(Long accountId, String email, String name, int version, Long agentId, int agentVersion) {
-        return issue(accountId, email, name, "AGENT", version, Map.of("agent", agentId, "agentVer", agentVersion), agentTtl);
+    public String issueForAgent(Long userId, String email, String name, int version, Long agentId, int agentVersion) {
+        return issue(userId, email, name, "AGENT", version, Map.of("agent", agentId, "agentVer", agentVersion), agentTtl);
     }
 
-    private String issue(Long accountId, String email, String name, String role, int version,
+    private String issue(Long userId, String email, String name, String role, int version,
                          Map<String, Object> extra, Duration lifetime) {
         Instant now = Instant.now();
         JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
-                .subject(String.valueOf(accountId))
+                .subject(String.valueOf(userId))
                 .claim("email", email)
                 .claim("name", name)
                 .claim("role", role)
@@ -98,8 +98,8 @@ public class Tokens {
         return jwt.serialize();
     }
 
-    /** What a verified token says about its account: which one, which generation of its tokens, and whether it was minted for an agent. */
-    public record Claims(Long accountId, int version, boolean agent) {}
+    /** What a verified token says about its user: which one, which generation of its tokens, and whether it was minted for an agent. */
+    public record Claims(Long userId, int version, boolean agent) {}
 
     /** What a token names, or empty if the signature is wrong, the token is malformed, or it has expired. */
     public Optional<Claims> claimsFrom(String token) {

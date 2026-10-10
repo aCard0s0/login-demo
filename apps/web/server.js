@@ -12,7 +12,7 @@ const PAGES = {
   '/': 'index.html',
   '/login': 'login.html',
   '/todos': 'todos.html',
-  '/account': 'account.html',
+  '/profile': 'profile.html',
   '/admin': 'admin.html',
   '/agents': 'agents.html',
   '/agent': 'agent.html',

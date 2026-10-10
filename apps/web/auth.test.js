@@ -63,8 +63,8 @@ test('POST /api/login reaches auth-service with method, body and status intact',
 });
 
 test('Authorization header passes through untouched', async () => {
-  await fetch(`${base}/api/accounts/me`, { headers: { authorization: 'Bearer t0k' } });
-  assert.equal(seen.at(-1).url, '/api/accounts/me');
+  await fetch(`${base}/api/users/me`, { headers: { authorization: 'Bearer t0k' } });
+  assert.equal(seen.at(-1).url, '/api/users/me');
   assert.equal(seen.at(-1).headers.authorization, 'Bearer t0k');
 });
 
@@ -83,16 +83,15 @@ test('/api/agents and /api/public/agents reach agent-service, not auth-service',
   assert.equal(seen.length, before, 'auth-service saw none of it');
 });
 
-test('/api/bank and /api/public/bank reach account-service; /api/accounts still reaches auth-service', async () => {
+test('/api/bank and /api/public/bank reach account-service; /api/users still reaches auth-service', async () => {
   const before = seen.length;
   await fetch(`${base}/api/bank/accounts/3/transfers`, { headers: { authorization: 'Bearer t0k' } });
   assert.equal(seenByBank.at(-1).url, '/api/bank/accounts/3/transfers');
   await fetch(`${base}/api/public/bank/stats`);
   assert.equal(seenByBank.at(-1).url, '/api/public/bank/stats');
   assert.equal(seen.length, before, 'auth-service saw none of it');
-  // The login accounts and the money accounts share a word, not a service.
-  await fetch(`${base}/api/accounts/me`);
-  assert.equal(seen.at(-1).url, '/api/accounts/me');
+  await fetch(`${base}/api/users/me`);
+  assert.equal(seen.at(-1).url, '/api/users/me');
   // A whole segment, not a prefix: /api/banking is not the bank's.
   await fetch(`${base}/api/banking`);
   assert.equal(seen.at(-1).url, '/api/banking');
@@ -142,7 +141,7 @@ test('api(): token rides as Bearer; 401 with a token clears the session and boun
   assert.equal(location.href, '/todos', 'no token held, so no bounce');
 
   setSession('t0k', 'Ana');
-  await assert.rejects(api('/api/accounts/me'), { message: 'session expired' });
+  await assert.rejects(api('/api/users/me'), { message: 'session expired' });
   assert.equal(sent.init.headers.authorization, 'Bearer t0k');
   assert.equal(store.size, 0, 'session forgotten');
   assert.equal(location.href, '/login?expired');

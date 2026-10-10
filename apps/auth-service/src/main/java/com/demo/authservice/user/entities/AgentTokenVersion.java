@@ -1,4 +1,4 @@
-package com.demo.authservice.account;
+package com.demo.authservice.user.entities;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

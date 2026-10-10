@@ -1,5 +1,6 @@
-package com.demo.authservice.account;
+package com.demo.authservice.user;
 
+import com.demo.authservice.user.entities.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,16 +24,16 @@ public class AdminSeeder implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AdminSeeder.class);
 
-    private final AccountService accounts;
+    private final UserService users;
 
     private final String email;
 
     private final String password;
 
-    public AdminSeeder(AccountService accounts,
+    public AdminSeeder(UserService users,
                        @Value("${admin.email:}") String email,
                        @Value("${admin.password:}") String password) {
-        this.accounts = accounts;
+        this.users = users;
         this.email = email;
         this.password = password;
     }
@@ -40,11 +41,11 @@ public class AdminSeeder implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         if (email.isBlank() || password.isBlank()) {
-            log.warn("no admin.email/admin.password set — starting with no admin account");
+            log.warn("no admin.email/admin.password set — starting with no admin user");
             return;
         }
-        Account admin = accounts.ensureAdmin(email, password);
+        User admin = users.ensureAdmin(email, password);
         // The address, never the password: this line goes to the container logs.
-        log.info("admin account ready: {}", admin.getEmail());
+        log.info("admin user ready: {}", admin.getEmail());
     }
 }

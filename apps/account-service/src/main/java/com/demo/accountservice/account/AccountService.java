@@ -49,9 +49,9 @@ public class AccountService {
 
     public List<Account> list(Caller caller) {
         if (caller.isAgent()) {
-            return accounts.findReachableByAgent(caller.accountId(), caller.agentId());
+            return accounts.findReachableByAgent(caller.userId(), caller.agentId());
         }
-        return caller.readsEveryone() ? accounts.findAllByOrderByIdAsc() : accounts.findByOwnerOrderByIdAsc(caller.accountId());
+        return caller.readsEveryone() ? accounts.findAllByOrderByIdAsc() : accounts.findByOwnerOrderByIdAsc(caller.userId());
     }
 
     /** The account, if this caller may at least read it; else 404. */
@@ -72,7 +72,7 @@ public class AccountService {
     /** Opens an account for the caller, or for one of the caller's agents when {@code agentId} is given. */
     public Account create(Caller caller, NewAccount in) {
         userOnly(caller);
-        return accounts.save(new Account(caller.accountId(), in.agentId(), cleanName(in.name())));
+        return accounts.save(new Account(caller.userId(), in.agentId(), cleanName(in.name())));
     }
 
     @Transactional
@@ -161,7 +161,7 @@ public class AccountService {
     }
 
     private static boolean owns(Caller caller, Account account) {
-        return account.getOwner().equals(caller.accountId())
+        return account.getOwner().equals(caller.userId())
                 && (!caller.isAgent() || caller.agentId().equals(account.getAgentId()));
     }
 

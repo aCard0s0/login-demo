@@ -14,11 +14,11 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * Which tokens auth-service has revoked, so a suspended or signed-out account is turned away here too and not
+ * Which tokens auth-service has revoked, so a suspended or signed-out user is turned away here too and not
  * only at auth-service. Tokens are checked in process, so without this a revoked one would keep working
  * against the service until it expired.
  *
- * <p>auth-service publishes, per account it has ever revoked, the token version a token must carry to count --
+ * <p>auth-service publishes, per user it has ever revoked, the token version a token must carry to count --
  * and per agent whose tokens an owner has revoked alone, keyed {@code agent:<id>} so the two cannot collide.
  * The list is cached and re-read at most every few seconds, so a revocation bites here within that window
  * rather than on the next request.
@@ -49,12 +49,12 @@ public class Revocations {
         this.uri = uri;
     }
 
-    /** The lowest token version this account's tokens must carry. Zero for an account never revoked. */
-    public int minimumVersion(String accountId) {
+    /** The lowest token version this user's tokens must carry. Zero for a user never revoked. */
+    public int minimumVersion(String userId) {
         if (stale()) {
             refresh();
         }
-        return versions.getOrDefault(accountId, 0);
+        return versions.getOrDefault(userId, 0);
     }
 
     /** The lowest {@code agentVer} this agent's own tokens must carry. Zero for an agent never revoked. */

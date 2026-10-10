@@ -1,6 +1,10 @@
-package com.demo.authservice.account;
+package com.demo.authservice.user;
 
 import com.demo.authservice.token.Tokens;
+import com.demo.authservice.user.entities.AgentTokenVersionRepository;
+import com.demo.authservice.user.entities.Role;
+import com.demo.authservice.user.entities.User;
+import com.demo.authservice.user.entities.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,25 +19,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 // Inline rather than a test application.properties, which would shadow the main one instead of merging over it.
 // Its own database file, so re-creating the schema cannot disturb another test class.
 @SpringBootTest(properties = {
-        "spring.datasource.url=jdbc:sqlite:target/test-account.db",
+        "spring.datasource.url=jdbc:sqlite:target/test-user.db",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         // SQLite allows a single writer; one connection keeps Hibernate from tripping over itself.
         "spring.datasource.hikari.maximum-pool-size=1",
 })
-class AccountServiceTests {
+class UserServiceTests {
 
     @Autowired
-    AccountService auth;
+    UserService auth;
 
     @Autowired
-    AccountRepository accounts;
+    UserRepository users;
 
     @Autowired
     AgentTokenVersionRepository agentVersions;
 
     @Test
     void registerHashesThePasswordAndMakesAPlainUser() {
-        Account created = auth.register("Ada", "ada@example.com", "correct-horse");
+        User created = auth.register("Ada", "ada@example.com", "correct-horse");
 
         assertNotEquals("correct-horse", created.getPasswordHash(), "password must not be stored in plain text");
         assertTrue(created.getPasswordHash().startsWith("$2"), "password must be BCrypt hashed");
@@ -41,9 +45,9 @@ class AccountServiceTests {
     }
 
     @Test
-    void onlyAChangeOfRoleMovesAnAccountOffUser() {
-        Account admin = auth.ensureAdmin("boss@example.com", "boss-pass-01");
-        Account user = auth.register("Rosalind", "rosalind@example.com", "franklin-1920");
+    void onlyAChangeOfRoleMovesAUserOffTheUserRole() {
+        User admin = auth.ensureAdmin("boss@example.com", "boss-pass-01");
+        User user = auth.register("Rosalind", "rosalind@example.com", "franklin-1920");
 
         assertEquals(Role.MODERATOR, auth.changeRole(admin, user.getId(), Role.MODERATOR).getRole());
         assertEquals(Role.USER, auth.changeRole(admin, user.getId(), Role.USER).getRole(), "and back again");
@@ -54,7 +58,7 @@ class AccountServiceTests {
 
     @Test
     void anAdminCannotDemoteItself() {
-        Account admin = auth.ensureAdmin("last@example.com", "last-pass-01");
+        User admin = auth.ensureAdmin("last@example.com", "last-pass-01");
 
         assertThrows(IllegalArgumentException.class, () -> auth.changeRole(admin, admin.getId(), Role.USER),
                 "the last admin demoting itself would leave nobody able to promote anyone");
@@ -63,19 +67,19 @@ class AccountServiceTests {
     }
 
     @Test
-    void seedingTheAdminIsCreateOnlyAndPromotesAnAccountThatIsAlreadyThere() {
-        Account first = auth.ensureAdmin("seed@example.com", "seed-pass-01");
+    void seedingTheAdminIsCreateOnlyAndPromotesAUserThatIsAlreadyThere() {
+        User first = auth.ensureAdmin("seed@example.com", "seed-pass-01");
         assertEquals(Role.ADMIN, first.getRole());
 
         // A restart with a changed .env must not reset a password the admin has since changed.
-        Account again = auth.ensureAdmin("seed@example.com", "a-completely-different-password");
-        assertEquals(first.getId(), again.getId(), "seeding twice must not make a second account");
+        User again = auth.ensureAdmin("seed@example.com", "a-completely-different-password");
+        assertEquals(first.getId(), again.getId(), "seeding twice must not make a second user");
         assertEquals(first.getPasswordHash(), again.getPasswordHash(), "seeding must never reset the password");
 
-        Account registered = auth.register("Later", "later@example.com", "later-pass-01");
+        User registered = auth.register("Later", "later@example.com", "later-pass-01");
         assertEquals(Role.ADMIN, auth.ensureAdmin("later@example.com", "ignored-entirely").getRole(),
-                "naming an existing account as the admin promotes it");
-        assertEquals(registered.getId(), accounts.findByEmail("later@example.com").orElseThrow().getId());
+                "naming an existing user as the admin promotes it");
+        assertEquals(registered.getId(), users.findByEmail("later@example.com").orElseThrow().getId());
     }
 
     @Test
@@ -96,24 +100,24 @@ class AccountServiceTests {
 
     @Test
     void updateNeedsTheCurrentPasswordAndKeepsEmailsUnique() {
-        Account taken = auth.register("Taken", "taken@example.com", "taken-pass-1");
-        Account edna = auth.register("Edna", "edna@example.com", "edna-pass-01");
+        User taken = auth.register("Taken", "taken@example.com", "taken-pass-1");
+        User edna = auth.register("Edna", "edna@example.com", "edna-pass-01");
 
         assertThrows(IllegalArgumentException.class,
                 () -> auth.update(edna.getId(), "Edna", "edna@example.com", "wrong", null),
                 "the current password must be checked even when only the name changes");
         assertThrows(IllegalArgumentException.class,
                 () -> auth.update(edna.getId(), "Edna", taken.getEmail(), "edna-pass-01", null),
-                "an update must not be able to steal another account's email");
+                "an update must not be able to steal another user's email");
 
-        Account renamed = auth.update(edna.getId(), "Edna Mode", "edna.mode@example.com", "edna-pass-01", "new-pass-007");
+        User renamed = auth.update(edna.getId(), "Edna Mode", "edna.mode@example.com", "edna-pass-01", "new-pass-007");
         assertEquals("Edna Mode", renamed.getName());
         assertEquals("edna.mode@example.com", renamed.getEmail());
     }
 
     @Test
     void byTokenResolvesASignedTokenAndRejectsATamperedOne() {
-        Account grace = auth.register("Grace", "grace@example.com", "hopper-1906");
+        User grace = auth.register("Grace", "grace@example.com", "hopper-1906");
         String token = auth.issue(grace);
 
         assertEquals("grace@example.com", auth.byToken(token).orElseThrow().getEmail());
@@ -126,8 +130,8 @@ class AccountServiceTests {
     void tokensStopVerifyingOnceTheyHaveExpired() throws Exception {
         // A negative lifetime makes every token already expired, so the test does not have to wait.
         Tokens expired = new Tokens(Duration.ofSeconds(-1));
-        AccountService stale = new AccountService(accounts, agentVersions, expired);
-        Account edsger = stale.register("Edsger", "edsger@example.com", "dijkstra-1930");
+        UserService stale = new UserService(users, agentVersions, expired);
+        User edsger = stale.register("Edsger", "edsger@example.com", "dijkstra-1930");
         // The same Tokens that signed it does the checking, so only the expiry can be what rejects it.
         String token = expired.issue(edsger.getId(), edsger.getEmail(), edsger.getName(), edsger.getRole().name(), 0);
 
@@ -136,23 +140,23 @@ class AccountServiceTests {
 
     @Test
     void oneServiceCannotVerifyAnotherServicesTokens() throws Exception {
-        Account barbara = auth.register("Barbara", "barbara@example.com", "liskov-1939");
+        User barbara = auth.register("Barbara", "barbara@example.com", "liskov-1939");
         String token = auth.issue(barbara);
 
-        AccountService other = new AccountService(accounts, agentVersions, new Tokens(Duration.ofMinutes(30)));
+        UserService other = new UserService(users, agentVersions, new Tokens(Duration.ofMinutes(30)));
         assertTrue(other.byToken(token).isEmpty(), "a different keypair must not accept this token");
     }
 
     @Test
-    void suspendingKillsTheTokensAnAccountHoldsAndReactivatingDoesNotRevive() {
-        Account admin = auth.register("Root", "root@example.com", "root-pass-01");
-        Account alan = auth.register("Alan", "turing@example.com", "turing-1912");
+    void suspendingKillsTheTokensAUserHoldsAndReactivatingDoesNotRevive() {
+        User admin = auth.register("Root", "root@example.com", "root-pass-01");
+        User alan = auth.register("Alan", "turing@example.com", "turing-1912");
         String before = auth.issue(alan);
 
         auth.setSuspended(admin, alan.getId(), true);
-        assertTrue(auth.byToken(before).isEmpty(), "a suspended account's token must stop working at once");
+        assertTrue(auth.byToken(before).isEmpty(), "a suspended user's token must stop working at once");
 
-        Account back = auth.setSuspended(admin, alan.getId(), false);
+        User back = auth.setSuspended(admin, alan.getId(), false);
         assertTrue(auth.byToken(before).isEmpty(), "reactivating must not bring an old token back");
         assertEquals(alan.getId(), auth.byToken(auth.issue(back)).orElseThrow().getId(), "a new token works");
 
@@ -162,11 +166,11 @@ class AccountServiceTests {
 
     @Test
     void revokingKillsEveryLiveTokenButNotTheNextOne() {
-        Account linus = auth.register("Linus", "linus@example.com", "torvalds-1969");
+        User linus = auth.register("Linus", "linus@example.com", "torvalds-1969");
         String first = auth.issue(linus);
         String second = auth.issue(linus);
 
-        Account revoked = auth.revokeTokens(linus.getId());
+        User revoked = auth.revokeTokens(linus.getId());
         assertTrue(auth.byToken(first).isEmpty());
         assertTrue(auth.byToken(second).isEmpty());
         assertEquals(revoked.getTokenVersion(), auth.tokenVersions().get(String.valueOf(linus.getId())),

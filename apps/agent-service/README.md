@@ -34,8 +34,8 @@ one agent uses on another go through it.
 
 ## Who owns what
 
-Agents belong to the account id in the token's `sub`, and **only** to it: there is no role that sees
-everybody's agents, an admin included. Another account's agent id comes back **404, not 403**, from every
+Agents belong to the user id in the token's `sub`, and **only** to it: there is no role that sees
+everybody's agents, an admin included. Another user's agent id comes back **404, not 403**, from every
 endpoint, from every agent tool, and from `/mcp`, so neither answer says whether it exists.
 
 An agent acts **as its owner**. An MCP client connects with either the owner's own login token or an **agent
@@ -48,7 +48,7 @@ the agent's own version, the token's `agentVer` falls behind it, and every servi
 ten-second poll of the revocation feed. The owner's login and their other agents are untouched. Whatever token the client connected with is what a
 server row marked *forward caller token* receives as its `Authorization` header -- which is how the built-in
 todo server knows whose todos to show, and why a READ agent cannot see anybody else's. Agents are not
-accounts; the `AGENT` role lives only on these tokens, and **every `/api` endpoint in every service answers it
+users; the `AGENT` role lives only on these tokens, and **every `/api` endpoint in every service answers it
 403**. Here, an agent token that could edit agents would widen its own access or mint itself fresh tokens,
 the very thing the agent tools refuse; at todo-service and account-service it would skip the READ/WRITE gate
 below and the activity log; at auth-service it could change its owner's password. Its one way in is `/mcp`,

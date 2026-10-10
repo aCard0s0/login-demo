@@ -42,7 +42,7 @@ class ApiContractTests {
     @Autowired
     AgentService agents;
 
-    /** The verifier is unit-tested against a real JWKS; here it just maps two fixed tokens to two accounts. */
+    /** The verifier is unit-tested against a real JWKS; here it just maps two fixed tokens to two users. */
     @MockitoBean
     JwtVerifier jwt;
 

@@ -1,7 +1,7 @@
 package com.demo.authservice.session;
 
-import com.demo.authservice.account.Account;
-import com.demo.authservice.account.AccountRepository;
+import com.demo.authservice.user.entities.User;
+import com.demo.authservice.user.entities.UserRepository;
 import com.demo.authservice.support.AttemptWindow;
 import com.demo.authservice.support.TooManyAttemptsException;
 import com.demo.authservice.token.Tokens;
@@ -18,7 +18,7 @@ import java.util.Optional;
 @Service
 public class SessionService {
 
-    /** Compared against when the email is unknown, so a missing account costs the same time as a wrong password. */
+    /** Compared against when the email is unknown, so a missing user costs the same time as a wrong password. */
     private static final String DUMMY_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
     // ponytail: per email, not per IP, because every browser request arrives from the Node proxy and would share
@@ -27,38 +27,38 @@ public class SessionService {
 
     private final PasswordEncoder encoder = new BCryptPasswordEncoder();
 
-    private final AccountRepository accounts;
+    private final UserRepository users;
 
     private final Tokens tokens;
 
-    public SessionService(AccountRepository accounts, Tokens tokens) {
-        this.accounts = accounts;
+    public SessionService(UserRepository users, Tokens tokens) {
+        this.users = users;
         this.tokens = tokens;
     }
 
     public Optional<Session> login(String email, String password) {
         String cleanEmail = email == null ? "" : email.strip().toLowerCase();
-        // Empty rather than null, so a missing password still costs one hash and cannot tell an account apart.
+        // Empty rather than null, so a missing password still costs one hash and cannot tell a user apart.
         String cleanPassword = password == null ? "" : password;
         if (failures.exceeded(cleanEmail)) {
             throw new TooManyAttemptsException("too many failed logins for that email, try again in "
                     + failures.window().toMinutes() + " minutes");
         }
-        Optional<Account> account = accounts.findByEmail(cleanEmail);
-        if (account.isEmpty()) {
+        Optional<User> user = users.findByEmail(cleanEmail);
+        if (user.isEmpty()) {
             encoder.matches(cleanPassword, DUMMY_HASH);
             failures.record(cleanEmail);
             return Optional.empty();
         }
-        if (!encoder.matches(cleanPassword, account.get().getPasswordHash())) {
+        if (!encoder.matches(cleanPassword, user.get().getPasswordHash())) {
             failures.record(cleanEmail);
             return Optional.empty();
         }
         failures.clear(cleanEmail);
-        Account found = account.get();
+        User found = user.get();
         // Only after the password checks out, so a stranger cannot use this to learn who is suspended.
         if (found.isSuspended()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this account is suspended");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "this user is suspended");
         }
         return Optional.of(new Session(tokens.issue(found.getId(), found.getEmail(), found.getName(),
                 found.getRole().name(), found.getTokenVersion()), found));
