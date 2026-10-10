@@ -4,6 +4,7 @@ import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
 import com.demo.agentservice.agent.Agent;
 import com.demo.agentservice.agent.AgentMcpServer;
+import com.demo.agentservice.agent.ServerUrls;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -15,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -46,10 +48,10 @@ final class McpTools {
      * Every tool the agent may use right now, named {@code server__tool}. A server that cannot be reached is
      * written to the log and skipped, so one dead URL does not hide the others.
      */
-    static List<Tool> list(Agent agent, String bearer, ActivityLog activity) {
+    static List<Tool> list(Agent agent, String bearer, ActivityLog activity, ServerUrls urls) {
         Map<String, Tool> offered = new LinkedHashMap<>();
         for (AgentMcpServer server : agent.getServers()) {
-            try (McpSyncClient client = connect(server, bearer)) {
+            try (McpSyncClient client = connect(server, bearer, urls)) {
                 for (Tool tool : client.listTools().tools()) {
                     if (server.getAccess().allows(readOnly(tool))) {
                         Tool mine = renamed(server, tool);
@@ -70,9 +72,9 @@ final class McpTools {
     }
 
     /** Runs one tool on the server its name points at, after checking that server's row as it is right now. */
-    static ToolResult call(Agent agent, String bearer, String name, Map<String, Object> args) {
+    static ToolResult call(Agent agent, String bearer, String name, Map<String, Object> args, ServerUrls urls) {
         AgentMcpServer server = serverOf(agent, name);
-        try (McpSyncClient client = connect(server, bearer)) {
+        try (McpSyncClient client = connect(server, bearer, urls)) {
             List<Tool> matching = client.listTools().tools().stream()
                     .filter(t -> offeredName(server.getName(), t.name()).equals(name)).toList();
             if (matching.size() > 1) {
@@ -102,12 +104,16 @@ final class McpTools {
         return best;
     }
 
-    private static McpSyncClient connect(AgentMcpServer server, String bearer) {
+    private static McpSyncClient connect(AgentMcpServer server, String bearer, ServerUrls urls) {
+        // Against what the name resolves to right now, not only what it resolved to when the row was saved.
+        urls.checkBeforeConnect(server.getUrl());
         String auth = server.isForwardCallerToken() ? "Bearer " + bearer : server.getAuthHeader();
         URI url = URI.create(server.getUrl());
         String base = url.getScheme() + "://" + url.getRawAuthority();
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base)
                 .endpoint(endpoint(url))
+                // A public server answering 302 to a private address would be the check above, undone.
+                .customizeClient(client -> client.followRedirects(HttpClient.Redirect.NEVER))
                 .connectTimeout(Duration.ofSeconds(5))
                 .httpRequestCustomizer((request, method, uri, body, context) -> {
                     if (auth != null) {

@@ -360,6 +360,17 @@ cmd_verify() {
     die "agent-service served a list with no token at all" 1
   fi
 
+  # agent-service POSTs to the servers an owner attaches, from inside the compose network. Its own servers pass by
+  # name; anything pointing back into the network -- a compose name, the metadata address -- must be refused on save.
+  for probe in "http://auth-service:9081/internal/token-versions" "http://169.254.169.254/latest/meta-data" "http://127.0.0.1:9081/"; do
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base/api/agents/$id/servers" -H "Authorization: Bearer $token" \
+      -H 'content-type: application/json' -d "{\"name\":\"evil\",\"url\":\"$probe\",\"access\":\"READ\"}") || true
+    [ "$code" = 400 ] || die "a server at $probe was accepted ($code): agent-service would POST into its own network" 1
+  done
+  curl -fsS -o /dev/null -X POST "$base/api/agents/$id/servers" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
+    -d '{"name":"bank","url":"http://account-service:9084/mcp","access":"READ","forwardCallerToken":true}' \
+    || die "the built-in account server was refused: it must be on AGENTS_TRUSTED_SERVER_URLS" 1
+
   step "connecting to the agent over MCP"
   local atoken tools
   atoken=$(curl -fsS -X POST "$base/api/agents/$id/token" -H "Authorization: Bearer $token" \
@@ -396,7 +407,7 @@ cmd_verify() {
     die "the MCP endpoint listed tools with no token at all" 1
   fi
 
-  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows, every REST API refused the agent token"
+  say "ok — auth-service signed a JWT, todo-, agent- and account-service verified it locally, an MCP client saw only what READ allows, every REST API refused the agent token, agent-service refused to POST into its own network"
   note "this left an account, a todo, a bank account and an agent behind: $email"
   note "connect your own agent: open /agent?id=$id, Create token, paste the claude mcp add line"
 }

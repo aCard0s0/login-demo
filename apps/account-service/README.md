@@ -100,7 +100,8 @@ Opening, depositing and granting are not offered at all. The annotation is what 
 permission keys on, so `transfer` must never carry it.
 
 To let one of your agents use it, add a server to the agent on `/agent?id=<id>`: url
-`http://account-service:9084/mcp`, **forward caller token** on, access READ or WRITE. Connect with the
+`http://account-service:9084/mcp` (a private name, so agent-service only accepts it because compose lists it
+in `AGENTS_TRUSTED_SERVER_URLS`), **forward caller token** on, access READ or WRITE. Connect with the
 agent's own token (**Create token** on that page): account-service sees the `agent` claim, and the agent
 reaches the accounts opened for it plus whatever it was granted -- and only those, whatever the
 agent-service access says.

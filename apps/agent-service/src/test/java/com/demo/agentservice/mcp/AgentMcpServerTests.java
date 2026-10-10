@@ -34,6 +34,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.server.ResponseStatusException;
@@ -60,6 +62,9 @@ import static org.mockito.Mockito.when;
         "spring.datasource.url=jdbc:sqlite:target/mcp-test.db",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.datasource.hikari.maximum-pool-size=1",
+        // The fake server is on loopback, which the URL policy refuses unless the deployment trusts it by name. The
+        // port is only known once the server is up; ServerUrls reads this on every call, so the placeholder is fine.
+        "agents.trusted-server-urls=http://127.0.0.1:${local.server.port}/fake-mcp,http://127.0.0.1:1/nothing",
 })
 class AgentMcpServerTests {
 
@@ -107,6 +112,9 @@ class AgentMcpServerTests {
     @Autowired
     ActivityLog activity;
 
+    @Autowired
+    ConfigurableEnvironment env;
+
     /** Unit-tested against a real JWKS elsewhere; here three fixed bearers stand for three kinds of caller. */
     @MockitoBean
     JwtVerifier jwt;
@@ -132,7 +140,7 @@ class AgentMcpServerTests {
     private Agent agentWith(Access access, OthersAccess others) {
         Agent agent = agents.create(OWNER, new NewAgent("gateway", "Be brief.", others));
         agents.removeServer(OWNER, agent.getId(), agent.getServers().get(0).getId(), "");
-        agents.addServer(OWNER, agent.getId(), new NewMcpServer("fake", "http://localhost:" + port + "/fake-mcp", null, true, access), "");
+        agents.addServer(OWNER, agent.getId(), new NewMcpServer("fake", "http://127.0.0.1:" + port + "/fake-mcp", null, true, access), "");
         return agents.get(OWNER, agent.getId());
     }
 
@@ -285,6 +293,30 @@ class AgentMcpServerTests {
         assertEquals(2, log(agent.getId(), Activity.CONNECTED).size(), "only the two accepted connections are in the log");
     }
 
+    /** The URL policy runs again at connect time, against what the name resolves to then, not only when the row was saved. */
+    @Test
+    void aServerTrustedWhenSavedButNotWhenConnectingIsRefusedAtConnect() {
+        Agent agent = agentWith(Access.WRITE, OthersAccess.NONE);
+        try (McpSyncClient client = connect("tok-100", agent.getId())) {
+            assertEquals(List.of("fake__read_thing", "fake__write_thing"), names(client), "trusted: reachable");
+            // The deployment stops trusting the address between two calls. Same effect as the name moving to a private address.
+            env.getPropertySources().addFirst(new MapPropertySource("untrust", Map.of("agents.trusted-server-urls", "")));
+            try {
+                assertEquals(List.of(), names(client), "the listing refuses it before connecting");
+                CallToolResult refused = client.callTool(new CallToolRequest("fake__read_thing", Map.of()));
+                assertTrue(Boolean.TRUE.equals(refused.isError()));
+                assertEquals("error: the tool call failed; the agent's activity log has the detail", text(refused));
+            } finally {
+                env.getPropertySources().remove("untrust");
+            }
+            assertEquals(List.of("fake__read_thing", "fake__write_thing"), names(client), "trusted again: reachable again");
+        }
+        assertEquals(List.of(), CALLS, "nothing reached the server while it was refused");
+        List<String> calls = log(agent.getId(), Activity.TOOL_CALL);
+        assertTrue(calls.get(0).startsWith("fake__read_thing {} -> error: refused: '127.0.0.1' resolves to 127.0.0.1"), calls.toString());
+        assertTrue(calls.get(1).startsWith("server 'fake': could not connect: refused: '127.0.0.1' resolves to 127.0.0.1"), calls.toString());
+    }
+
     /** The client wraps the server's JSON-RPC error a couple of times; the reason is somewhere down the cause chain. */
     private static void assertRefused(Runnable connect, String why) {
         RuntimeException e = assertThrows(RuntimeException.class, connect::run);
@@ -299,7 +331,7 @@ class AgentMcpServerTests {
     void initializeCarriesTheInstructionsAndADeadServerIsSkippedNotFatal() {
         Agent agent = agents.create(OWNER, new NewAgent("lonely", "Only ever list.", OthersAccess.NONE));
         agents.updateServer(OWNER, agent.getId(), agent.getServers().get(0).getId(),
-                new UpdateMcpServer(null, "http://localhost:1/nothing", null, null, null), "");
+                new UpdateMcpServer(null, "http://127.0.0.1:1/nothing", null, null, null), "");
         try (McpSyncClient client = connect("tok-100", agent.getId())) {
             InitializeResult hello = client.getCurrentInitializationResult();
             assertEquals("Only ever list.", hello.instructions());

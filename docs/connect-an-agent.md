@@ -130,3 +130,4 @@ curl -s -X POST "http://localhost:3000/mcp?agent=<id>" \
 | a tool is missing from the list | the server is READ and the tool is not annotated read-only, or `othersAccess` is NONE |
 | `denied: needs WRITE on server '…' (has READ)` | the call was made anyway; change the access on the page |
 | `server 'x': could not connect` in Activity | the attached URL is unreachable from inside the compose network |
+| `url is refused: …` when adding a server, or `could not connect: refused: …` in Activity | the URL points at a private, loopback, link-local or metadata address, or a bare compose name; only the deployment's own servers may (`AGENTS_TRUSTED_SERVER_URLS`) |

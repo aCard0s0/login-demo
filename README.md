@@ -253,8 +253,14 @@ owner** -- the token it connected with is forwarded to that server -- so it can 
 todos. Any other Streamable HTTP MCP server can be added by URL, with an optional authorization header.
 
 An agent reads or changes the owner's other agents only when its **other agents** setting says READ or WRITE,
-through built-in tools scoped to the same owner; it can never change its own setup. Details, the activity
-kinds and the deliberate limitations (it will POST to any URL an owner types) are in the
+through built-in tools scoped to the same owner; it can never change its own setup.
+
+A server URL an owner types is checked before it is saved and again before every connection: the
+deployment's own servers (`AGENTS_TRUSTED_SERVER_URLS`, and the built-in todo one) pass by name, and any
+other must resolve to a public address -- nothing loopback, private, link-local (the cloud metadata address
+lives there), carrier-grade NAT or multicast, and no bare compose service name -- so agent-service cannot be
+pointed at the database or auth-service's `/internal` endpoints from inside its own network. Redirects are
+not followed. Details, the activity kinds and the deliberate limitations are in the
 [agent-service README](apps/agent-service/README.md).
 
 ## Signing in with Google or GitHub
@@ -351,6 +357,7 @@ Ports 9081-9084 rather than 8081-8084: Docker holds those on this machine. Overr
 point the frontend elsewhere with `AUTH_URL` / `TODO_URL` / `AGENT_URL` / `ACCOUNT_URL`. todo-service,
 agent-service and account-service find the signing key through `auth.jwks-uri` (`AUTH_JWKS_URI` in compose) and revocations
 through `auth.token-versions-uri` (`AUTH_TOKEN_VERSIONS_URI`); agent-service finds the built-in todo MCP
-server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`) and the token minter through
+server through `agents.todo-mcp-url` (`AGENTS_TODO_MCP_URL`), the other servers it may reach by compose name
+through `agents.trusted-server-urls` (`AGENTS_TRUSTED_SERVER_URLS`) and the token minter through
 `auth.agent-tokens-uri` (`AUTH_AGENT_TOKENS_URI`); and all four services take
 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` from the environment.

@@ -6,8 +6,13 @@ import com.demo.token.Caller;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.InetAddress;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,6 +27,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "spring.datasource.hikari.maximum-pool-size=1",
 })
 class AgentServiceTests {
+
+    /** The *.example servers below are public as far as the URL policy is concerned, without touching DNS. */
+    @TestConfiguration
+    static class FakeDns {
+        @Bean
+        @Primary
+        ServerUrls serverUrls(Environment env) {
+            return new ServerUrls(env, host -> new InetAddress[] {InetAddress.getByName(host.endsWith(".example") ? "93.184.216.34" : host)});
+        }
+    }
 
     @Autowired
     AgentService agents;
@@ -106,6 +121,14 @@ class AgentServiceTests {
         assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(), server("", Access.READ), ""));
         assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(),
                 new NewMcpServer("ok", "ftp://nope", null, false, Access.READ), ""), "only http(s) servers");
+        // The URL policy is applied on the way in, on add and on edit: nothing private is ever saved.
+        assertEquals("url is refused: '10.0.0.1' resolves to 10.0.0.1, a loopback, private, link-local, carrier-grade NAT or multicast address",
+                assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(),
+                        new NewMcpServer("ok", "http://10.0.0.1/mcp", null, false, Access.READ), "")).getReason());
+        assertThrows(ResponseStatusException.class, () -> agents.updateServer(user("5"), a.getId(), a.getServers().get(0).getId(),
+                new UpdateMcpServer(null, "http://auth-service:9081/internal/agent-tokens", null, null, null), ""));
+        assertEquals(1, agents.get(user("5"), a.getId()).getServers().size());
+        assertEquals("http://localhost:9082/mcp", agents.get(user("5"), a.getId()).getServers().get(0).getUrl(), "the edit must not have stuck");
         assertThrows(ResponseStatusException.class, () -> agents.addServer(user("5"), a.getId(),
                 new NewMcpServer("ok", "http://mcp.example/", null, false, null), ""), "access is required");
 

@@ -18,7 +18,7 @@ the `agent` database.
 
 ```
 agent/     Agent  AgentMcpServer  Access  OthersAccess  AgentRepository  AgentService  AgentController
-           NewAgent  UpdateAgent  NewMcpServer  UpdateMcpServer  AgentResponse  McpServerResponse
+           NewAgent  UpdateAgent  NewMcpServer  UpdateMcpServer  AgentResponse  McpServerResponse  ServerUrls
 activity/  Activity  ActivityRepository  ActivityLog  ActivityResponse
 mcp/       AgentMcpServer (the /mcp endpoint and its handler)  McpTools  AgentTools  AccessDenied  ToolResult
 token/     AgentTokens   (JwtVerifier, Revocations and Caller come from the shared apps/token module)
@@ -73,6 +73,26 @@ agent can read and a `tool_denied` line in the log.
 
 Tool names reach the client as `<server>__<tool>`, so two servers with the same tool cannot collide; server
 names are therefore short, lower-case and unique per agent.
+
+## Where a server may point
+
+agent-service POSTs to the servers an owner attaches, from inside the compose network -- where the database
+and auth-service's `/internal` endpoints live. `ServerUrls` is the rule that keeps an owner's URL from
+pointing it there:
+
+- **The deployment's own servers pass by name**: `agents.trusted-server-urls`, plus the built-in todo
+  server, compared exactly as written (a different port or path on the same host is not the trusted server).
+  They are private addresses by design.
+- **Any other URL** must be `http(s)`, name a host with a dot in it -- a bare name is a compose service, or
+  `localhost` -- and resolve **only** to public addresses: no loopback, any-local, private (10/8, 172.16/12,
+  192.168/16), link-local (169.254/16, where the cloud metadata address 169.254.169.254 lives, and fe80::/10),
+  carrier-grade NAT (100.64/10), unique-local (fc00::/7) or multicast address. An IPv4-mapped IPv6 literal is
+  judged as the IPv4 address it wraps; a name that does not resolve is refused, not deferred.
+- **Checked twice.** On save, as a 400 with the reason, so nothing private is ever stored; and again right
+  before every connection, against what the name resolves to at that moment, so a name that was public when
+  saved and points somewhere private since (DNS rebinding) is refused on `tools/list` (the server is skipped
+  and logged as `could not connect: refused: …`) and on `tools/call` (an error result). Redirects are never
+  followed, so a public server cannot answer 302 to a private address either.
 
 ## Other agents
 
@@ -150,14 +170,15 @@ back as `{"error": "..."}` like everywhere else.
 | `auth.agent-tokens-uri` | `AUTH_AGENT_TOKENS_URI` | `http://localhost:9081/internal/agent-tokens`; `/{id}/revoke` under it is where a per-agent revoke goes |
 | `auth.internal-secret` | `AUTH_INTERNAL_SECRET` | `dev-internal-secret` -- sent as `X-Internal-Secret` when asking for a token; compose requires `INTERNAL_SECRET` in `.env` |
 | `spring.datasource.*` | `SPRING_DATASOURCE_*` | `jdbc:postgresql://localhost:5432/agent`, `agent` / `agent` |
-| `agents.todo-mcp-url` | `AGENTS_TODO_MCP_URL` | `http://localhost:9082/mcp`; blank seeds no server |
+| `agents.todo-mcp-url` | `AGENTS_TODO_MCP_URL` | `http://localhost:9082/mcp`; blank seeds no server; always trusted |
+| `agents.trusted-server-urls` | `AGENTS_TRUSTED_SERVER_URLS` | `http://localhost:9084/mcp`; comma separated, the deployment's other servers an owner may attach by their private name |
 
 ## Limitations, on purpose
 
-- **It will POST to any URL an owner types**, from inside the compose network, where the database and
-  auth-service's `/internal` endpoints live. A real deployment puts an allow-list or an egress proxy in front
-  of `McpTools`; blocking private ranges here would also block the built-in server. The connecting token is
-  forwarded only to servers explicitly marked for it.
+- **The connect-time URL check resolves the name, then the HTTP client resolves it again.** The JVM caches a
+  positive lookup for 30 seconds, so the two agree in practice; pinning the connection to the checked
+  address needs a custom resolver on the client. The connecting token is forwarded only to servers
+  explicitly marked for it.
 - **Every `tools/call` reconnects** to the one downstream server: initialize, list its tools (for the
   read-only annotation), call, close. Three round trips per call. A short per-URL cache is the upgrade if
   latency ever matters.
@@ -179,5 +200,8 @@ docker compose up -d db
 Tests: `AgentMcpServerTests` runs the permission rules end to end -- the real MCP client connects to `/mcp`
 as an external agent would, against a real MCP server mounted in the same context -- including a permission
 flipped between two calls, an agent trying to widen its own access, and who may connect at all;
-`AgentServiceTests` the ownership rules and the activity log; `ApiContractTests` the 401, 404 and token
-shapes. The token check itself is tested once, in `apps/token`.
+including a server trusted when saved and refused at connect; `AgentServiceTests` the ownership rules, the
+activity log and a private URL refused on add and on edit; `ServerUrlsTests` every refused address category,
+exact trust, and a name that moves to a private address between save and connect, all against a resolver
+table rather than DNS; `ApiContractTests` the 401, 404 and token shapes. The token check itself is tested
+once, in `apps/token`.

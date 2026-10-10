@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -30,11 +29,13 @@ public class AgentService {
 
     private final AgentRepository agents;
     private final ActivityLog activity;
+    private final ServerUrls urls;
     private final String todoMcpUrl;
 
-    public AgentService(AgentRepository agents, ActivityLog activity, @Value("${agents.todo-mcp-url:}") String todoMcpUrl) {
+    public AgentService(AgentRepository agents, ActivityLog activity, ServerUrls urls, @Value("${agents.todo-mcp-url:}") String todoMcpUrl) {
         this.agents = agents;
         this.activity = activity;
+        this.urls = urls;
         this.todoMcpUrl = todoMcpUrl == null ? "" : todoMcpUrl.strip();
     }
 
@@ -102,7 +103,7 @@ public class AgentService {
         if (in.access() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "access must be READ or WRITE");
         }
-        AgentMcpServer server = new AgentMcpServer(agent, name, cleanUrl(in.url()), blankToNull(in.authHeader()),
+        AgentMcpServer server = new AgentMcpServer(agent, name, urls.clean(in.url()), blankToNull(in.authHeader()),
                 Boolean.TRUE.equals(in.forwardCallerToken()), in.access());
         agent.getServers().add(server);
         // save() merges, so the row with an id is the one on the saved copy, not the one built above.
@@ -121,7 +122,7 @@ public class AgentService {
             changes.add("server '" + was + "' renamed '" + server.getName() + "'");
         }
         if (in.url() != null && !in.url().strip().equals(server.getUrl())) {
-            server.setUrl(cleanUrl(in.url()));
+            server.setUrl(urls.clean(in.url()));
             changes.add("server '" + server.getName() + "' url changed");
         }
         if (in.authHeader() != null) {
@@ -182,18 +183,6 @@ public class AgentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "server name already used by this agent");
         }
         return clean;
-    }
-
-    private static String cleanUrl(String url) {
-        try {
-            URI uri = URI.create(url == null ? "" : url.strip());
-            if (!("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) || uri.getHost() == null) {
-                throw new IllegalArgumentException();
-            }
-            return uri.toString();
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "url must be http(s)://host[:port]/path");
-        }
     }
 
     private static String blankToNull(String s) {

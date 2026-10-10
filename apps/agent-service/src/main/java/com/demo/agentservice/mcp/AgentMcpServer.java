@@ -4,6 +4,7 @@ import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
 import com.demo.agentservice.agent.Agent;
 import com.demo.agentservice.agent.AgentService;
+import com.demo.agentservice.agent.ServerUrls;
 import com.demo.token.Caller;
 import com.demo.token.JwtVerifier;
 import io.modelcontextprotocol.common.McpTransportContext;
@@ -60,14 +61,14 @@ public class AgentMcpServer {
     static final String AGENT = "agent";
 
     @Bean
-    ServletRegistrationBean<HttpServletStatelessServerTransport> agentMcpServlet(AgentService agents, ActivityLog activity, JwtVerifier jwt) {
+    ServletRegistrationBean<HttpServletStatelessServerTransport> agentMcpServlet(AgentService agents, ActivityLog activity, JwtVerifier jwt, ServerUrls urls) {
         HttpServletStatelessServerTransport transport = HttpServletStatelessServerTransport.builder()
                 .messageEndpoint("/mcp")
                 .contextExtractor(request -> McpTransportContext.create(Map.of(
                         AUTHORIZATION, Objects.requireNonNullElse(request.getHeader("Authorization"), ""),
                         AGENT, Objects.requireNonNullElse(request.getParameter(AGENT), ""))))
                 .build();
-        transport.setMcpHandler(new Handler(transport.protocolVersions(), agents, activity, jwt));
+        transport.setMcpHandler(new Handler(transport.protocolVersions(), agents, activity, jwt, urls));
         ServletRegistrationBean<HttpServletStatelessServerTransport> servlet = new ServletRegistrationBean<>(transport, "/mcp");
         servlet.setName("agent-mcp");
         servlet.setAsyncSupported(true);
@@ -86,12 +87,14 @@ public class AgentMcpServer {
         private final AgentService agents;
         private final ActivityLog activity;
         private final JwtVerifier jwt;
+        private final ServerUrls urls;
 
-        Handler(List<String> protocolVersions, AgentService agents, ActivityLog activity, JwtVerifier jwt) {
+        Handler(List<String> protocolVersions, AgentService agents, ActivityLog activity, JwtVerifier jwt, ServerUrls urls) {
             this.protocolVersions = protocolVersions;
             this.agents = agents;
             this.activity = activity;
             this.jwt = jwt;
+            this.urls = urls;
         }
 
         @Override
@@ -164,7 +167,7 @@ public class AgentMcpServer {
         private List<Tool> tools(Session s) {
             AgentTools builtins = new AgentTools(s.caller(), s.agent(), agents, activity);
             return Stream.concat(builtins.defs(s.agent().getOthersAccess()).stream(),
-                    McpTools.list(s.agent(), s.bearer(), activity).stream()).toList();
+                    McpTools.list(s.agent(), s.bearer(), activity, urls).stream()).toList();
         }
 
         /** Runs one tool -- or refuses it -- and says what happened in the agent's log either way. */
@@ -174,7 +177,7 @@ public class AgentMcpServer {
             AgentTools builtins = new AgentTools(s.caller(), s.agent(), agents, activity);
             ToolResult result;
             try {
-                result = builtins.has(in.name()) ? builtins.call(in.name(), args) : McpTools.call(s.agent(), s.bearer(), in.name(), args);
+                result = builtins.has(in.name()) ? builtins.call(in.name(), args) : McpTools.call(s.agent(), s.bearer(), in.name(), args, urls);
                 activity.record(s.agent().getId(), Activity.TOOL_CALL,
                         what + (result.error() ? " -> error: " : " -> ok: ") + ActivityLog.brief(result.text()));
             } catch (AccessDenied denied) {
