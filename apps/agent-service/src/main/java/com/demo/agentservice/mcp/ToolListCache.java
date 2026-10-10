@@ -1,5 +1,7 @@
 package com.demo.agentservice.mcp;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
 import java.nio.charset.StandardCharsets;
@@ -9,8 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -22,39 +23,29 @@ import java.util.function.Supplier;
  * <p>Only the server's raw listing is cached. What the agent is offered and allowed is decided after, from the
  * agent row as it is right now, so the cache never extends a permission; and the URL policy runs before, so it
  * never skips the connect-time check either.
+ *
+ * <p>A Caffeine cache: entries expire by age, the least recently used go first past the size cap, and two
+ * requests missing the same key at once make one connection, not two. A failed load caches nothing.
  */
-// ponytail: one process-wide map, evicted lazily on read and cleared outright past a size cap. Enough for a demo;
-// a bounded LRU is the upgrade if the number of distinct servers ever matters.
 final class ToolListCache {
 
     static final int MAX_ENTRIES = 1000;
 
-    private record Entry(Instant at, List<Tool> tools) {}
+    private final Cache<String, List<Tool>> entries;
 
-    private final Map<String, Entry> entries = new ConcurrentHashMap<>();
-
-    private final Duration ttl;
-
-    private final Supplier<Instant> clock;
-
+    /** {@code clock} is what the TTL is measured by: the tests move it, the service passes {@code Instant::now}. */
     ToolListCache(Duration ttl, Supplier<Instant> clock) {
-        this.ttl = ttl;
-        this.clock = clock;
+        this.entries = Caffeine.newBuilder()
+                .expireAfterWrite(ttl)
+                .maximumSize(MAX_ENTRIES)
+                .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.get().toEpochMilli()))
+                .build();
     }
 
-    /** The cached list, or the one {@code load} produces, which is then kept for the TTL. A failed load caches nothing. */
+    /** The cached list, or the one {@code load} produces, which is then kept for the TTL. */
     List<Tool> get(String url, String credential, Supplier<List<Tool>> load) {
         String key = url + " " + sha256(credential == null ? "" : credential);
-        Entry entry = entries.get(key);
-        if (entry != null && entry.at().plus(ttl).isAfter(clock.get())) {
-            return entry.tools();
-        }
-        List<Tool> tools = List.copyOf(load.get());
-        if (entries.size() >= MAX_ENTRIES) {
-            entries.clear();
-        }
-        entries.put(key, new Entry(clock.get(), tools));
-        return tools;
+        return entries.get(key, k -> List.copyOf(load.get()));
     }
 
     static String sha256(String s) {

@@ -31,6 +31,10 @@ support/   AgentExceptionAdvice
 Inside `agent`, `entities` holds what is stored (the two enums included, since the rows carry them) and `dto`
 what crosses the API; `dto` may import `entities`, never the other way round.
 `com.demo.auth.client` is the [`../../libs/auth-client`](../../libs/auth-client/README.md) module todo-service and wallet-service share.
+`ServerUrls` is the `UrlPolicy` of [`../../libs/outbound-urls`](../../libs/outbound-urls/README.md), fed the two trusted-URL
+properties; `AuthHeaderCrypto` and `AuthHeaderMigration` are the `EncryptedText` converter and the column migration of
+[`../../libs/jpa-crypto`](../../libs/jpa-crypto/README.md), bound to `agents.auth-header-key` and the `auth_header` column.
+`Bad.request` and the `{error}` advice come from [`../../libs/web-errors`](../../libs/web-errors/README.md).
 `AgentService` is the one place that decides whose agents a caller sees, and both the REST API and the tools
 one agent uses on another go through it.
 
@@ -104,8 +108,9 @@ names are therefore short, lower-case and unique per agent.
 ## Where a server may point
 
 agent-service POSTs to the servers an owner attaches, from inside the compose network -- where the database
-and auth-service's `/internal` endpoints live. `ServerUrls` is the rule that keeps an owner's URL from
-pointing it there:
+and auth-service's `/internal` endpoints live. `ServerUrls` -- the `UrlPolicy` of
+[`libs/outbound-urls`](../../libs/outbound-urls/README.md), fed the two properties below -- is the rule that keeps
+an owner's URL from pointing it there:
 
 - **The deployment's own servers pass by name**: `agents.trusted-server-urls`, plus the built-in todo
   server, compared exactly as written (a different port or path on the same host is not the trusted server).
@@ -184,10 +189,16 @@ one fixed endpoint.
 | POST | `/mcp?agent={id}` | MCP Streamable HTTP, see above |
 | GET | `/api/public/agents/stats` | `{agents}` -- no token |
 
-A server's stored `authHeader` is never returned; responses carry `hasAuthHeader` instead, plus `trusted`
-and the `readOnlyTools` list. Rejections come back as `{"error": "..."}` like everywhere else.
+| GET | `/actuator/health` | `{"status":"UP"}` -- no token, no detail; the compose healthcheck. Outside `/api`, so the proxy never forwards it |
 
-The header is **encrypted at rest**, AES-256-GCM, by a JPA converter (`AuthHeaderCrypto`): the entity reads
+A server's stored `authHeader` is never returned; responses carry `hasAuthHeader` instead, plus `trusted`
+and the `readOnlyTools` list. Rejections come back as `{"error": "..."}` like everywhere else. The limits on a
+body -- name required, column widths, the server-name alphabet -- are the annotations on the DTO records,
+checked by `AgentService` rather than the controller so the tools one agent uses on another are held to the
+same rule; a violation is a 400 whose `error` is the annotation's own sentence.
+
+The header is **encrypted at rest**, AES-256-GCM, by a JPA converter (`AuthHeaderCrypto`, the `EncryptedText` of
+[`libs/jpa-crypto`](../../libs/jpa-crypto/README.md)): the entity reads
 and writes plain text and nothing else in the service knows. The key is `agents.auth-header-key`, which
 compose refuses to start without; blank refuses to start here too, rather than quietly storing plain text.
 Each value is `v1:` plus a fresh nonce and the ciphertext, so equal headers never look alike on disk and a
@@ -209,6 +220,16 @@ unreadable, so it belongs with the database.
 | `agents.todo-mcp-url` | `AGENTS_TODO_MCP_URL` | `http://localhost:9082/mcp`; blank seeds no server; always trusted |
 | `agents.trusted-server-urls` | `AGENTS_TRUSTED_SERVER_URLS` | `http://localhost:9084/mcp`; comma separated, the deployment's other servers an owner may attach by their private name |
 
+## Schema
+
+Flyway owns it: [`src/main/resources/db/migration`](src/main/resources/db/migration), `V1` the tables, `V2` the
+activity index, and Hibernate only **validates** the entities against what it finds (`ddl-auto=validate`). A
+database built by the `ddl-auto=update` of earlier versions has no history table, so on first start it is
+baselined past `V1` (`spring.flyway.baseline-on-migrate`) and picks up from `V2`. A new column is a new
+`V<n>__*.sql`, never an entity change alone: the context refuses to start on a mismatch, which
+`PostgresIntegrationTests` proves before compose does. The SQLite-backed tests switch Flyway off and let
+Hibernate build their throwaway schema.
+
 ## Limitations, on purpose
 
 - **The connect-time URL check resolves the name, then the HTTP client resolves it again.** The JVM caches a
@@ -217,8 +238,9 @@ unreadable, so it belongs with the database.
   explicitly marked for it, and only when they are the deployment's own.
 - **Every `tools/call` still reconnects** to the one downstream server: initialize, call, close. The listing
   it needs comes from the 15-second cache, so two round trips rather than three; keeping the connection open is
-  the upgrade if latency ever matters. The cache is one process-wide map, cleared outright past a thousand
-  entries rather than evicted by age.
+  the upgrade if latency ever matters. The cache is a Caffeine cache: entries expire after the 15 seconds, the
+  least recently used go first past a thousand entries, and two requests missing the same server at once make
+  one connection, not two.
 - **A per-agent revoke bites within ten seconds, not at once.** The other services poll the revocation feed
   rather than ask auth-service per request, so a revoked agent token keeps working for up to one poll window.
 - **One encryption key, no rotation.** The `v1:` prefix on each stored header is what a second key version
@@ -232,7 +254,7 @@ unreadable, so it belongs with the database.
 ```bash
 docker compose up -d db
 ./mvnw -pl apps/agent-service spring-boot:run   # with auth-service and todo-service up
-./mvnw -pl apps/agent-service test              # SQLite backed: needs nothing running
+./mvnw -pl apps/agent-service test              # SQLite backed: needs nothing running; PostgresIntegrationTests wants Docker and skips without it
 ```
 
 Tests: `AgentMcpEndpointTests` runs the permission rules end to end -- the real MCP client connects to `/mcp`
@@ -244,9 +266,13 @@ including a server trusted when saved and refused at connect, a stored header re
 image with structured content coming through unchanged; `AgentServiceTests` the ownership rules, the
 activity log, a private URL refused on add and on edit, the caller's token refused for an untrusted URL,
 column widths refused before the database sees them, and a header encrypted on disk, plain once loaded
-and migrated from a legacy row; `AuthHeaderCryptoTests` the round trip, the wrong key and a tampered row; `ToolListCacheTests` one listing
+and migrated from a legacy row; `ToolListCacheTests` one listing
 per URL and credential within the TTL, a failure never cached, and a key that holds a hash rather than the
-token; `ServerUrlsTests` every refused address category,
-exact trust, and a name that moves to a private address between save and connect, all against a resolver
-table rather than DNS; `ApiContractTests` the 401, 404 and token shapes. The token check itself is tested
-once, in `../../libs/auth-client`.
+token; `ServerUrlsTests` that both properties feed the trusted set; `AgentMcpHandlerTests` that a log line
+which cannot be written never turns a tool that ran into a failure the model retries; `ApiContractTests` the
+401, 404, token and validation shapes and the healthcheck; `ArchitectureTests` the package rules above, with
+ArchUnit; `PostgresIntegrationTests` the Flyway migrations, Hibernate's validation of the entities against
+them, the one-statement log delete, the composite index and a legacy header row, against the real database
+in a throwaway container -- skipped, not failed, without Docker. The address rules are `UrlPolicyTests` in
+`../../libs/outbound-urls`, the crypto `EncryptedTextTests` in `../../libs/jpa-crypto`, and the token check
+`../../libs/auth-client`'s.

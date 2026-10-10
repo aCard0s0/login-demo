@@ -1,0 +1,16 @@
+# Nothing here scans dependencies otherwise. Spring Boot's BOM moves most versions; the MCP SDK moves on its own.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      spring:
+        patterns: ["org.springframework*"]
+      mcp:
+        patterns: ["io.modelcontextprotocol*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

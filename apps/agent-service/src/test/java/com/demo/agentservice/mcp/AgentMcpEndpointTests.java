@@ -64,6 +64,7 @@ import static org.mockito.Mockito.when;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.datasource.url=jdbc:sqlite:target/mcp-test.db",
         "spring.jpa.hibernate.ddl-auto=create-drop",
+        "spring.flyway.enabled=false",
         "spring.datasource.hikari.maximum-pool-size=1",
         // The fake server is on loopback. Under this exact URL the deployment trusts it, annotations and all; under any
         // other (a query string will do) it is an untrusted server, which the resolver below lets through the IP check.

@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
@@ -39,6 +40,16 @@ public abstract class ErrorBodyAdvice extends ResponseEntityExceptionHandler {
         String reason = e.getMostSpecificCause() instanceof InvalidFormatException bad && bad.getTargetType().isEnum()
                 ? "unknown value '" + bad.getValue() + "', expected one of " + Arrays.toString(bad.getTargetType().getEnumConstants())
                 : "request body could not be read";
+        return error(status, headers, reason);
+    }
+
+    /** A {@code @Valid} body that fails its constraints: the first violation's own sentence, not "Invalid request content." */
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException e, HttpHeaders headers,
+                                                                  HttpStatusCode status, WebRequest request) {
+        String reason = e.getBindingResult().getAllErrors().stream().findFirst()
+                .map(error -> error.getDefaultMessage() == null ? "request body is invalid" : error.getDefaultMessage())
+                .orElse("request body is invalid");
         return error(status, headers, reason);
     }
 

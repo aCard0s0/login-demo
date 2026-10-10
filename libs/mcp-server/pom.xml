@@ -25,6 +25,12 @@
             <artifactId>auth-client</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Bad.request: a malformed argument is the same 400 every service throws from its own rules. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>web-errors</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- Version from the root BOM. -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>

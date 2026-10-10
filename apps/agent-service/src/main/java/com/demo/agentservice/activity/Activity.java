@@ -21,7 +21,7 @@ import java.time.Instant;
  */
 @Entity
 // The index carries the id too, so "the last hundred of this agent" walks it backwards and stops, rather than sorting every line the agent has.
-@Table(name = "agent_activity", indexes = @Index(columnList = "agentId, id"))
+@Table(name = "agent_activity", indexes = @Index(name = "agent_activity_agent_id_id", columnList = "agentId, id"))
 @Getter
 @NoArgsConstructor
 public class Activity {

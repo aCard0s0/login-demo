@@ -1,6 +1,6 @@
 package com.demo.mcp.server;
 
-import org.springframework.http.HttpStatus;
+import com.demo.web.errors.Bad;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
@@ -51,7 +51,8 @@ public final class Args {
         throw bad(key + " must be a list");
     }
 
+    /** The same 400 as {@link Bad#request}, kept here so a tool's argument checks read in one voice. */
     public static ResponseStatusException bad(String why) {
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, why);
+        return Bad.request(why);
     }
 }

@@ -29,7 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 // Inline rather than a test application.properties, which would shadow the main one instead of merging over it.
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:sqlite:target/test.db",
+        // Hibernate builds the SQLite schema; the Postgres migrations run in PostgresIntegrationTests.
         "spring.jpa.hibernate.ddl-auto=create-drop",
+        "spring.flyway.enabled=false",
         // SQLite allows a single writer; one connection keeps Hibernate from tripping over itself.
         "spring.datasource.hikari.maximum-pool-size=1",
 })
