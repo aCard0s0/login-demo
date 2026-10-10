@@ -77,4 +77,14 @@ class ApiContractTests {
         assertEquals(0, todos.list(OWNER).size());
         mvc.perform(get("/api/public/todos/stats")).andExpect(status().isOk()).andExpect(jsonPath("$.todos").isNumber());
     }
+
+    /** MVC's own refusals -- a path id that is not a number, a body that does not parse -- in the same {error} body. */
+    @Test
+    void whatMvcRefusesComesBackInTheErrorShape() throws Exception {
+        when(jwt.callerOf("Bearer owner")).thenReturn(OWNER);
+        mvc.perform(put("/api/todos/abc").header("Authorization", "Bearer owner"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").isString());
+        mvc.perform(post("/api/todos").header("Authorization", "Bearer owner").contentType(MediaType.APPLICATION_JSON).content("{"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("request body could not be read"));
+    }
 }

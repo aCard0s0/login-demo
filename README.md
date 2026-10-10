@@ -13,6 +13,7 @@ Dockerfile              one file, one build, five runtime stages
 docker/initdb.sql       one database and one role per service
 .env.example            the admin credentials and OAuth client secrets compose reads from .env
 libs/auth-client        verifying those tokens: the one copy the three services below share
+libs/web-errors         the {error} body every service answers a rejection with
 apps/auth-service       accounts, login, OAuth, roles, tokens    :9081
 apps/todo-service       per-account todos, and their MCP server  :9082
 apps/agent-service      agents, their MCP servers, permissions   :9083
@@ -30,6 +31,7 @@ Each service documents itself:
 | account-service | money accounts for users and their agents, transfers, READ/WRITE grants per agent, and its `/mcp` | [apps/account-service](apps/account-service/README.md) |
 | web | the pages and the one-origin proxy | [apps/web](apps/web/README.md) |
 | auth-client | `JwtVerifier`, `Revocations` and `Caller`: a plain jar, no service, that todo-, agent- and account-service depend on | [libs/auth-client](libs/auth-client/README.md) |
+| web-errors | `ErrorBodyAdvice`: every rejection, MVC's own included, as `{"error": "..."}`; all four services extend it | [libs/web-errors](libs/web-errors/README.md) |
 
 ## Package convention
 
@@ -45,7 +47,8 @@ Two rules hold across all of them:
   services that check tokens in process depend on it rather than carrying a copy each.
 - **`stats` is the unauthenticated corner** of each service, kept apart so the trust boundary is visible in
   the tree rather than buried in a comment, and **`support`** holds the one cross-cutting piece each service
-  has: the advice that renders every rejection as `{"error": "..."}`.
+  has: the advice that renders every rejection as `{"error": "..."}`. It extends `ErrorBodyAdvice` from
+  `libs/web-errors` and adds only that service's domain rejections.
 
 ## Run
 

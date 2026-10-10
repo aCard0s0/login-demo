@@ -18,6 +18,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- ErrorBodyAdvice: the {error} body every service answers a rejection with. -->
+        <dependency>
+            <groupId>com.demo</groupId>
+            <artifactId>web-errors</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- BCrypt only. The full security starter would install a filter chain we would then have to switch off. -->
         <dependency>
             <groupId>org.springframework.security</groupId>
