@@ -62,7 +62,9 @@ class ApiContractTests {
         mvc.perform(get("/api/agents").header("Authorization", "Bearer one")).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].name").value("hers"))
                 .andExpect(jsonPath("$[0].servers[0].name").value("todos"))
-                .andExpect(jsonPath("$[0].servers[0].hasAuthHeader").value(false));
+                .andExpect(jsonPath("$[0].servers[0].hasAuthHeader").value(false))
+                .andExpect(jsonPath("$[0].servers[0].trusted").value(true))
+                .andExpect(jsonPath("$[0].servers[0].readOnlyTools").isEmpty());
         // Even an admin: agents are strictly the owner's.
         mvc.perform(get("/api/agents/" + hers).header("Authorization", "Bearer two")).andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("no such agent"));

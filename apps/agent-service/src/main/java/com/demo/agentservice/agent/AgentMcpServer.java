@@ -14,6 +14,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 /**
  * One MCP server an agent may use, and how far: READ or WRITE. The name is short and unique within the agent
  * because it prefixes every tool name the model sees ({@code todos__list_todos}), which keeps two servers'
@@ -21,6 +25,9 @@ import lombok.Setter;
  *
  * <p>Either a fixed {@code Authorization} header value, or the token of the user who started the run,
  * forwarded as-is ({@code forwardCallerToken}) -- the way the built-in todo server knows whose todos to show.
+ *
+ * <p>{@code readOnlyTools} is the owner's own word on which of this server's tools only read. It is what READ
+ * keys on for a server the deployment does not trust, since such a server can annotate anything it likes.
  */
 // ponytail: the header value is stored in plain text, like the database credentials in this demo. Encrypt it
 // with a key from the environment before any of this holds a real secret.
@@ -54,6 +61,10 @@ public class AgentMcpServer {
     @Column(nullable = false)
     private Access access;
 
+    /** Comma separated tool names, as the server names them. Null or empty: the owner marked none. */
+    @Column(length = 2000)
+    private String readOnlyTools;
+
     public AgentMcpServer(Agent agent, String name, String url, String authHeader, boolean forwardCallerToken, Access access) {
         this.agent = agent;
         this.name = name;
@@ -61,5 +72,10 @@ public class AgentMcpServer {
         this.authHeader = authHeader;
         this.forwardCallerToken = forwardCallerToken;
         this.access = access;
+    }
+
+    public Set<String> readOnlyToolSet() {
+        return readOnlyTools == null || readOnlyTools.isBlank() ? Set.of()
+                : Arrays.stream(readOnlyTools.split(",")).map(String::strip).filter(s -> !s.isEmpty()).collect(Collectors.toSet());
     }
 }

@@ -97,8 +97,10 @@ curl -s -X POST "http://localhost:3000/mcp?agent=<id>" \
 - `tools/list` is the union of: every attached MCP server's tools that the agent's access allows, named
   `<server>__<tool>` (`todos__list_todos`), plus the built-in agent tools if **Access to your other agents**
   is READ or WRITE.
-- **READ** on a server offers only tools that server annotates `readOnlyHint: true`. **WRITE** offers all.
-  A new agent starts with the built-in `todos` server as READ, so it can list todos and nothing else.
+- **READ** on a server offers only the tools that only read: for the stack's own servers, the ones the server
+  annotates `readOnlyHint: true`; for a server you added by URL, the ones you listed under *Read-only tools*
+  on its row (none listed, nothing offered), since a server you typed in can annotate anything. **WRITE**
+  offers all. A new agent starts with the built-in `todos` server as READ, so it can list todos and nothing else.
 - Every call is re-checked against what is saved right now. Flip `todos` to WRITE on the page and the next
   `todos__add_todo` goes through; flip it back and the next one is refused. The refusal is an `isError` tool
   result the model can read, not a transport error.
@@ -127,7 +129,7 @@ curl -s -X POST "http://localhost:3000/mcp?agent=<id>" \
 | `invalid or expired token` | wrong, expired or revoked token; make a new one on the agent's page |
 | `no such agent` | the `agent=` id is not yours, or the agent token is for a different agent |
 | `which agent? connect to /mcp?agent=<id>, or use an agent token` | a login token with no `agent=` parameter; an agent token needs none |
-| a tool is missing from the list | the server is READ and the tool is not annotated read-only, or `othersAccess` is NONE |
+| a tool is missing from the list | the server is READ and the tool is not read-only -- by its annotation on a trusted server, by your *Read-only tools* list on any other -- or `othersAccess` is NONE |
 | `denied: needs WRITE on server '…' (has READ)` | the call was made anyway; change the access on the page |
 | `server 'x': could not connect` in Activity | the attached URL is unreachable from inside the compose network |
 | `url is refused: …` when adding a server, or `could not connect: refused: …` in Activity | the URL points at a private, loopback, link-local or metadata address, or a bare compose name; only the deployment's own servers may (`AGENTS_TRUSTED_SERVER_URLS`) |

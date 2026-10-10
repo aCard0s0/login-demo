@@ -8,6 +8,7 @@ import com.demo.agentservice.agent.AgentService;
 import com.demo.agentservice.agent.NewAgent;
 import com.demo.agentservice.agent.NewMcpServer;
 import com.demo.agentservice.agent.OthersAccess;
+import com.demo.agentservice.agent.ServerUrls;
 import com.demo.agentservice.agent.UpdateAgent;
 import com.demo.agentservice.agent.UpdateMcpServer;
 import com.demo.token.Caller;
@@ -35,12 +36,13 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
-import org.springframework.core.env.ConfigurableEnvironment;
-import org.springframework.core.env.MapPropertySource;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.InetAddress;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -63,17 +65,28 @@ import static org.mockito.Mockito.when;
         "spring.datasource.url=jdbc:sqlite:target/mcp-test.db",
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.datasource.hikari.maximum-pool-size=1",
-        // The fake server is on loopback, which the URL policy refuses unless the deployment trusts it by name. The
-        // port is only known once the server is up; ServerUrls reads this on every call, so the placeholder is fine.
-        "agents.trusted-server-urls=http://127.0.0.1:${local.server.port}/fake-mcp,http://127.0.0.1:1/nothing",
+        // The fake server is on loopback. Under this exact URL the deployment trusts it, annotations and all; under any
+        // other (a query string will do) it is an untrusted server, which the resolver below lets through the IP check.
+        // The port is only known once the server is up; ServerUrls reads this on every call, so the placeholder is fine.
+        "agents.trusted-server-urls=http://127.0.0.1:${local.server.port}/fake-mcp",
 })
 class AgentMcpServerTests {
 
     /** Every tool call the fake server received, by tool name. */
     static final List<String> CALLS = new CopyOnWriteArrayList<>();
 
+    /** While true, 127.0.0.1 is reported as a public address, so the loopback fake server can stand in for an untrusted public one. */
+    static volatile boolean loopbackLooksPublic = true;
+
     @TestConfiguration
     static class FakeMcp {
+        @Bean
+        @Primary
+        ServerUrls serverUrls(Environment env) {
+            return new ServerUrls(env, host -> new InetAddress[] {
+                    InetAddress.getByName(loopbackLooksPublic && host.equals("127.0.0.1") ? "93.184.216.34" : host)});
+        }
+
         @Bean
         ServletRegistrationBean<HttpServletStatelessServerTransport> fakeMcp() {
             HttpServletStatelessServerTransport transport = HttpServletStatelessServerTransport.builder()
@@ -126,9 +139,6 @@ class AgentMcpServerTests {
     @Autowired
     ActivityLog activity;
 
-    @Autowired
-    ConfigurableEnvironment env;
-
     /** Unit-tested against a real JWKS elsewhere; here three fixed bearers stand for three kinds of caller. */
     @MockitoBean
     JwtVerifier jwt;
@@ -142,6 +152,7 @@ class AgentMcpServerTests {
     @BeforeEach
     void setUp() {
         CALLS.clear();
+        loopbackLooksPublic = true;
         when(jwt.callerOf(any())).thenAnswer(call -> switch (String.valueOf((Object) call.getArgument(0))) {
             case "Bearer tok-100" -> OWNER;
             case "Bearer tok-101" -> STRANGER;
@@ -150,11 +161,20 @@ class AgentMcpServerTests {
         });
     }
 
-    /** An agent whose only server is the fake one, with the given access. */
+    /** An agent whose only server is the fake one, trusted by the deployment, with the given access. */
     private Agent agentWith(Access access, OthersAccess others) {
+        return agentWith(access, others, "/fake-mcp", null);
+    }
+
+    /** The same server reached by a URL the deployment does not trust: an owner's own server, as far as the gateway knows. */
+    private Agent agentWithUntrusted(Access access, List<String> readOnlyTools) {
+        return agentWith(access, OthersAccess.NONE, "/fake-mcp?untrusted", readOnlyTools);
+    }
+
+    private Agent agentWith(Access access, OthersAccess others, String endpoint, List<String> readOnlyTools) {
         Agent agent = agents.create(OWNER, new NewAgent("gateway", "Be brief.", others));
         agents.removeServer(OWNER, agent.getId(), agent.getServers().get(0).getId(), "");
-        agents.addServer(OWNER, agent.getId(), new NewMcpServer("fake", "http://127.0.0.1:" + port + "/fake-mcp", null, true, access), "");
+        agents.addServer(OWNER, agent.getId(), new NewMcpServer("fake", "http://127.0.0.1:" + port + endpoint, null, true, access, readOnlyTools), "");
         return agents.get(OWNER, agent.getId());
     }
 
@@ -328,26 +348,51 @@ class AgentMcpServerTests {
 
     /** The URL policy runs again at connect time, against what the name resolves to then, not only when the row was saved. */
     @Test
-    void aServerTrustedWhenSavedButNotWhenConnectingIsRefusedAtConnect() {
-        Agent agent = agentWith(Access.WRITE, OthersAccess.NONE);
+    void aServerPublicWhenSavedButPrivateWhenConnectingIsRefusedAtConnect() {
+        Agent agent = agentWithUntrusted(Access.WRITE, List.of("read_thing"));
         try (McpSyncClient client = connect("tok-100", agent.getId())) {
-            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client), "trusted: reachable");
-            // The deployment stops trusting the address between two calls. Same effect as the name moving to a private address.
-            env.getPropertySources().addFirst(new MapPropertySource("untrust", Map.of("agents.trusted-server-urls", "")));
-            try {
-                assertEquals(List.of(), names(client), "the listing refuses it before connecting");
-                CallToolResult refused = client.callTool(new CallToolRequest("fake__read_thing", Map.of()));
-                assertTrue(Boolean.TRUE.equals(refused.isError()));
-                assertEquals("error: the tool call failed; the agent's activity log has the detail", text(refused));
-            } finally {
-                env.getPropertySources().remove("untrust");
-            }
-            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client), "trusted again: reachable again");
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client), "public: reachable");
+            // Between two calls the name starts resolving to the loopback address it really is: DNS rebinding.
+            loopbackLooksPublic = false;
+            assertEquals(List.of(), names(client), "the listing refuses it before connecting");
+            CallToolResult refused = client.callTool(new CallToolRequest("fake__read_thing", Map.of()));
+            assertTrue(Boolean.TRUE.equals(refused.isError()));
+            assertEquals("error: the tool call failed; the agent's activity log has the detail", text(refused));
+            loopbackLooksPublic = true;
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client), "public again: reachable again");
         }
         assertEquals(List.of(), CALLS, "nothing reached the server while it was refused");
         List<String> calls = log(agent.getId(), Activity.TOOL_CALL);
         assertTrue(calls.get(0).startsWith("fake__read_thing {} -> error: refused: '127.0.0.1' resolves to 127.0.0.1"), calls.toString());
         assertTrue(calls.get(1).startsWith("server 'fake': could not connect: refused: '127.0.0.1' resolves to 127.0.0.1"), calls.toString());
+    }
+
+    /** A server the owner typed in can annotate anything, so on it READ is the owner's list and the annotation is ignored. */
+    @Test
+    void onAnUntrustedServerReadOffersOnlyWhatTheOwnerMarkedReadOnly() {
+        // The owner marks write_thing, not read_thing: perverse, and exactly what proves whose word counts.
+        Agent agent = agentWithUntrusted(Access.READ, List.of("write_thing"));
+        Long server = agent.getServers().get(0).getId();
+        try (McpSyncClient client = connect("tok-100", agent.getId())) {
+            assertEquals(List.of("fake__write_thing"), names(client), "the server's readOnlyHint on read_thing is not trusted");
+            CallToolResult refused = client.callTool(new CallToolRequest("fake__read_thing", Map.of()));
+            assertTrue(Boolean.TRUE.equals(refused.isError()));
+            assertEquals("denied: needs WRITE on server 'fake' (has READ)", text(refused));
+            assertFalse(Boolean.TRUE.equals(client.callTool(new CallToolRequest("fake__write_thing", Map.of())).isError()));
+
+            // The owner clears the list: READ on an untrusted server then offers nothing at all.
+            agents.updateServer(OWNER, agent.getId(), server, new UpdateMcpServer(null, null, null, null, null, List.of()), "");
+            assertEquals(List.of(), names(client));
+            assertTrue(Boolean.TRUE.equals(client.callTool(new CallToolRequest("fake__write_thing", Map.of())).isError()));
+
+            // WRITE offers everything, whatever the list says.
+            agents.updateServer(OWNER, agent.getId(), server, new UpdateMcpServer(null, null, null, null, Access.WRITE, null), "");
+            assertEquals(List.of("fake__picture_thing", "fake__read_thing", "fake__write_thing"), names(client));
+        }
+        assertEquals(List.of("write_thing"), CALLS);
+        assertEquals("server 'fake' read-only tools cleared", log(agent.getId(), Activity.CONFIG_CHANGED).get(1));
+        assertEquals(List.of("fake__write_thing: needs WRITE on server 'fake' (has READ)", "fake__read_thing: needs WRITE on server 'fake' (has READ)"),
+                log(agent.getId(), Activity.TOOL_DENIED));
     }
 
     /** The client wraps the server's JSON-RPC error a couple of times; the reason is somewhere down the cause chain. */

@@ -59,11 +59,19 @@ Two levels, one rule, enforced in `McpTools`:
 
 | | offered on `tools/list` | allowed on `tools/call` |
 |---|---|---|
-| **READ** | only tools whose MCP annotation says `readOnlyHint: true` | the same |
+| **READ** | only the tools that only read, see below | the same |
 | **WRITE** | every tool the server lists | every tool |
 
-A tool with no annotation is taken to **write**. That is the server's own declaration being trusted, so the
-rule is only as good as the server: the built-in todo server annotates `list_todos` and nothing else.
+Which tools "only read" depends on whether the deployment trusts the server:
+
+| server | READ keys on |
+|---|---|
+| trusted: on `agents.trusted-server-urls`, or the built-in todo server | the server's own MCP annotation, `readOnlyHint: true`; a tool with no annotation is taken to **write** |
+| any other, which an owner typed in | the owner's own list, `readOnlyTools` on the server row; the annotation is ignored, and an empty list means READ offers **nothing** |
+
+A server an owner adds can annotate anything it likes, so its word is only taken when the deployment vouches
+for it. The built-in todo server annotates `list_todos` and nothing else; account-service's `/mcp` annotates
+its two listing tools. Responses carry `trusted` per server so the page knows which rule applies.
 
 Two checks on purpose. `tools/list` is filtered by the access each row has, so a READ server's writing tools
 are not even described to the connecting agent. Each `tools/call` then re-reads the row: an owner who flips a
@@ -106,7 +114,7 @@ pointing it there:
 | needs | tools |
 |---|---|
 | READ or WRITE | `list_agents` · `get_agent` · `get_agent_activity` |
-| WRITE | `update_agent` · `add_mcp_server` · `set_mcp_access` · `remove_mcp_server` |
+| WRITE | `update_agent` · `add_mcp_server` (with an optional `readOnlyTools` list) · `set_mcp_access` · `remove_mcp_server` |
 
 It is re-read from the database before every call like the server access is. An agent may **never change
 its own configuration**, whatever its level: with that door open, one `set_mcp_access` call would be all the
@@ -153,8 +161,8 @@ one fixed endpoint.
 | GET | `/api/agents/{id}` | |
 | PATCH | `/api/agents/{id}` | `{name?, instructions?, othersAccess?}` -- only the fields sent change |
 | DELETE | `/api/agents/{id}` | and its activity |
-| POST | `/api/agents/{id}/servers` | `{name, url, access, forwardCallerToken?, authHeader?}` |
-| PATCH | `/api/agents/{id}/servers/{sid}` | `{name?, url?, access?, forwardCallerToken?, authHeader?}`; an empty `authHeader` clears it |
+| POST | `/api/agents/{id}/servers` | `{name, url, access, forwardCallerToken?, authHeader?, readOnlyTools?}` |
+| PATCH | `/api/agents/{id}/servers/{sid}` | `{name?, url?, access?, forwardCallerToken?, authHeader?, readOnlyTools?}`; an empty `authHeader` clears it, an empty `readOnlyTools` marks none |
 | DELETE | `/api/agents/{id}/servers/{sid}` | |
 | GET | `/api/agents/{id}/activity` | newest first, at most 100 |
 | POST | `/api/agents/{id}/token` | → `{token}`: a 30-day agent token, shown once, never stored; 502 if auth-service is down |
@@ -162,8 +170,8 @@ one fixed endpoint.
 | POST | `/mcp?agent={id}` | MCP Streamable HTTP, see above |
 | GET | `/api/public/agents/stats` | `{agents}` -- no token |
 
-A server's stored `authHeader` is never returned; responses carry `hasAuthHeader` instead. Rejections come
-back as `{"error": "..."}` like everywhere else.
+A server's stored `authHeader` is never returned; responses carry `hasAuthHeader` instead, plus `trusted`
+and the `readOnlyTools` list. Rejections come back as `{"error": "..."}` like everywhere else.
 
 ## Configuration
 
@@ -203,8 +211,10 @@ docker compose up -d db
 ```
 
 Tests: `AgentMcpServerTests` runs the permission rules end to end -- the real MCP client connects to `/mcp`
-as an external agent would, against a real MCP server mounted in the same context -- including a permission
-flipped between two calls, an agent trying to widen its own access, and who may connect at all;
+as an external agent would, against a real MCP server mounted in the same context, reached once by a trusted
+URL and once by an untrusted one -- including a permission flipped between two calls, an agent trying to
+widen its own access, an untrusted server whose annotations are ignored in favour of the owner's list, and
+who may connect at all;
 including a server trusted when saved and refused at connect, and an image with structured content coming
 through unchanged; `AgentServiceTests` the ownership rules, the
 activity log and a private URL refused on add and on edit; `ServerUrlsTests` every refused address category,

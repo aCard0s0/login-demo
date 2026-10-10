@@ -29,6 +29,9 @@ import java.util.Map;
  * {@link #call} then checks the row as it is in the database right then, so an owner who flips a server to
  * READ between two calls is obeyed from the next one -- and an agent that calls a tool it was never offered
  * is refused all the same.
+ *
+ * <p>Which tools "only read" is the server's own {@code readOnlyHint} for a server the deployment trusts, and
+ * the owner's {@code readOnlyTools} list for any other: a server an owner typed in can annotate anything.
  */
 // ponytail: stateless, so every call connects to the one downstream server afresh: initialize, list its tools
 // (for the read-only annotation), call, close. Three round trips per call. A short per-URL cache is the upgrade.
@@ -50,7 +53,7 @@ final class McpTools {
         for (AgentMcpServer server : agent.getServers()) {
             try (McpSyncClient client = connect(server, bearer, urls)) {
                 for (Tool tool : client.listTools().tools()) {
-                    if (server.getAccess().allows(readOnly(tool))) {
+                    if (server.getAccess().allows(readOnly(server, tool, urls))) {
                         Tool mine = renamed(server, tool);
                         // Two long names cut to the same 64 characters: offer neither as that name, rather than one at random.
                         if (offered.putIfAbsent(mine.name(), mine) != null) {
@@ -78,7 +81,7 @@ final class McpTools {
                 throw new AccessDenied("ambiguous tool: " + matching.size() + " tools on server '" + server.getName() + "' truncate to " + name);
             }
             Tool tool = matching.stream().findFirst().orElseThrow(() -> new AccessDenied("no such tool: " + name));
-            if (!server.getAccess().allows(readOnly(tool))) {
+            if (!server.getAccess().allows(readOnly(server, tool, urls))) {
                 throw new AccessDenied("needs WRITE on server '" + server.getName() + "' (has " + server.getAccess() + ")");
             }
             // Passed through whole: an image, an embedded resource or structured content reaches the model as it left the server.
@@ -137,9 +140,15 @@ final class McpTools {
         return url.getRawQuery() == null ? path : path + "?" + url.getRawQuery();
     }
 
-    /** The one rule READ keys on. A tool that does not say it is read-only is taken to write. */
-    static boolean readOnly(Tool tool) {
-        return tool.annotations() != null && Boolean.TRUE.equals(tool.annotations().readOnlyHint());
+    /**
+     * The one rule READ keys on. A trusted server's own annotation counts, and a tool that does not say it is
+     * read-only is taken to write; for any other server only the owner's list counts, and the annotation is ignored.
+     */
+    static boolean readOnly(AgentMcpServer server, Tool tool, ServerUrls urls) {
+        if (urls.trusted(server.getUrl())) {
+            return tool.annotations() != null && Boolean.TRUE.equals(tool.annotations().readOnlyHint());
+        }
+        return server.readOnlyToolSet().contains(tool.name());
     }
 
     /** {@code server__tool}, in the characters every client allows. Built-in tool names never contain "__". */

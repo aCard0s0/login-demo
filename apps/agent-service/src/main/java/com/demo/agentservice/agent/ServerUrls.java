@@ -38,7 +38,7 @@ public class ServerUrls {
 
     /** A name to its addresses: a seam for the tests, which must not depend on real DNS. */
     @FunctionalInterface
-    interface Resolver {
+    public interface Resolver {
         InetAddress[] resolve(String host) throws UnknownHostException;
     }
 
@@ -51,7 +51,7 @@ public class ServerUrls {
         this(env, InetAddress::getAllByName);
     }
 
-    ServerUrls(Environment env, Resolver resolver) {
+    public ServerUrls(Environment env, Resolver resolver) {
         this.env = env;
         this.resolver = resolver;
     }

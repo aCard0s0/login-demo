@@ -11,7 +11,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Everything an owner may do to its agents, and the only place that decides whose agents a caller sees. Every
@@ -105,6 +107,7 @@ public class AgentService {
         }
         AgentMcpServer server = new AgentMcpServer(agent, name, urls.clean(in.url()), blankToNull(in.authHeader()),
                 Boolean.TRUE.equals(in.forwardCallerToken()), in.access());
+        server.setReadOnlyTools(cleanTools(in.readOnlyTools()));
         agent.getServers().add(server);
         // save() merges, so the row with an id is the one on the saved copy, not the one built above.
         return changed(agent, by, List.of("server '" + name + "' added (" + in.access() + ")")).getServers().stream()
@@ -137,6 +140,13 @@ public class AgentService {
         if (in.access() != null && in.access() != server.getAccess()) {
             changes.add("server '" + server.getName() + "' access " + server.getAccess() + " -> " + in.access());
             server.setAccess(in.access());
+        }
+        if (in.readOnlyTools() != null) {
+            String tools = cleanTools(in.readOnlyTools());
+            if (!Objects.equals(tools, server.getReadOnlyTools())) {
+                server.setReadOnlyTools(tools);
+                changes.add("server '" + server.getName() + "' read-only tools " + (tools == null ? "cleared" : "set: " + tools));
+            }
         }
         changed(agent, by, changes);
         return server;
@@ -187,5 +197,18 @@ public class AgentService {
 
     private static String blankToNull(String s) {
         return s == null || s.isBlank() ? null : s.strip();
+    }
+
+    /** Tool names as the server names them, stripped, deduplicated and sorted; null when none are left. */
+    private static String cleanTools(List<String> tools) {
+        if (tools == null) {
+            return null;
+        }
+        String clean = tools.stream().filter(Objects::nonNull).map(String::strip).filter(s -> !s.isEmpty())
+                .distinct().sorted().collect(Collectors.joining(","));
+        if (clean.length() > 2000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "too many read-only tools");
+        }
+        return clean.isEmpty() ? null : clean;
     }
 }

@@ -40,12 +40,14 @@ public class AgentController {
     private final ActivityLog activity;
     private final JwtVerifier jwt;
     private final AgentTokens tokens;
+    private final ServerUrls urls;
 
-    public AgentController(AgentService agents, ActivityLog activity, JwtVerifier jwt, AgentTokens tokens) {
+    public AgentController(AgentService agents, ActivityLog activity, JwtVerifier jwt, AgentTokens tokens, ServerUrls urls) {
         this.agents = agents;
         this.activity = activity;
         this.jwt = jwt;
         this.tokens = tokens;
+        this.urls = urls;
     }
 
     /** The owner behind the token, or 401; an agent token is 403 because it has no business on this API. */
@@ -59,25 +61,25 @@ public class AgentController {
 
     @GetMapping
     public List<AgentResponse> list(@RequestHeader(value = "Authorization", required = false) String authz) {
-        return agents.list(owner(authz)).stream().map(AgentResponse::of).toList();
+        return agents.list(owner(authz)).stream().map(a -> AgentResponse.of(a, urls)).toList();
     }
 
     @PostMapping
     public AgentResponse create(@RequestHeader(value = "Authorization", required = false) String authz,
                                 @RequestBody NewAgent in) {
-        return AgentResponse.of(agents.create(owner(authz), in));
+        return AgentResponse.of(agents.create(owner(authz), in), urls);
     }
 
     @GetMapping("/{id}")
     public AgentResponse one(@RequestHeader(value = "Authorization", required = false) String authz,
                              @PathVariable Long id) {
-        return AgentResponse.of(agents.get(owner(authz), id));
+        return AgentResponse.of(agents.get(owner(authz), id), urls);
     }
 
     @PatchMapping("/{id}")
     public AgentResponse update(@RequestHeader(value = "Authorization", required = false) String authz,
                                 @PathVariable Long id, @RequestBody UpdateAgent in) {
-        return AgentResponse.of(agents.update(owner(authz), id, in, BY_OWNER));
+        return AgentResponse.of(agents.update(owner(authz), id, in, BY_OWNER), urls);
     }
 
     @DeleteMapping("/{id}")
@@ -89,14 +91,14 @@ public class AgentController {
     @PostMapping("/{id}/servers")
     public McpServerResponse addServer(@RequestHeader(value = "Authorization", required = false) String authz,
                                        @PathVariable Long id, @RequestBody NewMcpServer in) {
-        return McpServerResponse.of(agents.addServer(owner(authz), id, in, BY_OWNER));
+        return McpServerResponse.of(agents.addServer(owner(authz), id, in, BY_OWNER), urls);
     }
 
     @PatchMapping("/{id}/servers/{serverId}")
     public McpServerResponse updateServer(@RequestHeader(value = "Authorization", required = false) String authz,
                                           @PathVariable Long id, @PathVariable Long serverId,
                                           @RequestBody UpdateMcpServer in) {
-        return McpServerResponse.of(agents.updateServer(owner(authz), id, serverId, in, BY_OWNER));
+        return McpServerResponse.of(agents.updateServer(owner(authz), id, serverId, in, BY_OWNER), urls);
     }
 
     @DeleteMapping("/{id}/servers/{serverId}")

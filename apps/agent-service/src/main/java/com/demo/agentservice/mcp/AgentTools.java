@@ -62,8 +62,9 @@ class AgentTools {
             defs.add(def("update_agent", "Change an agent's name, instructions and/or access to other agents (NONE, READ, WRITE). Fields left out are unchanged.",
                     Map.of("id", integer(), "name", string(), "instructions", string(),
                             "othersAccess", Map.of("type", "string", "enum", List.of("NONE", "READ", "WRITE"))), List.of("id")));
-            defs.add(def("add_mcp_server", "Attach an MCP server (Streamable HTTP URL) to an agent with READ or WRITE access.",
-                    Map.of("id", integer(), "name", string(), "url", string(), "access", accessEnum()), List.of("id", "name", "url", "access")));
+            defs.add(def("add_mcp_server", "Attach an MCP server (Streamable HTTP URL) to an agent with READ or WRITE access. On a server the deployment does not trust, READ offers only readOnlyTools.",
+                    Map.of("id", integer(), "name", string(), "url", string(), "access", accessEnum(),
+                            "readOnlyTools", Map.of("type", "array", "items", string())), List.of("id", "name", "url", "access")));
             defs.add(def("set_mcp_access", "Change an agent's access to one of its MCP servers: READ or WRITE.",
                     Map.of("id", integer(), "serverId", integer(), "access", accessEnum()), List.of("id", "serverId", "access")));
             defs.add(def("remove_mcp_server", "Detach an MCP server from an agent.",
@@ -103,7 +104,7 @@ class AgentTools {
                         new UpdateAgent(string(args, "name"), string(args, "instructions"), othersAccess(args)), by));
                 case "add_mcp_server" -> {
                     AgentMcpServer added = agents.addServer(caller, id,
-                            new NewMcpServer(string(args, "name"), string(args, "url"), null, false, access(args)), by);
+                            new NewMcpServer(string(args, "name"), string(args, "url"), null, false, access(args), strings(args, "readOnlyTools")), by);
                     yield "added server #" + added.getId() + " '" + added.getName() + "' (" + added.getAccess() + ")";
                 }
                 case "set_mcp_access" -> {
@@ -169,6 +170,17 @@ class AgentTools {
     private static String string(Map<String, Object> args, String key) {
         Object value = args.get(key);
         return value == null ? null : String.valueOf(value);
+    }
+
+    private static List<String> strings(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(String::valueOf).toList();
+        }
+        throw bad(key + " must be a list of tool names");
     }
 
     private static Access access(Map<String, Object> args) {

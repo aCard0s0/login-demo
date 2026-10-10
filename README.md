@@ -241,8 +241,11 @@ good for 30 days, shown once, and killed early by **Revoke tokens** on that page
 **Revoke access** on the account (every token the owner holds).
 Step by step, for Claude Code, Cursor, VS Code and plain curl: [docs/connect-an-agent.md](docs/connect-an-agent.md).
 
-The permission is the service's, not the connecting agent's. **READ** offers only the tools a server
-annotates `readOnlyHint: true` and refuses any other; **WRITE** offers them all. Every tool call is checked
+The permission is the service's, not the connecting agent's. **READ** offers only the tools that only read
+and refuses any other; **WRITE** offers them all. Which tools only read is the server's own `readOnlyHint`
+for the servers the deployment trusts (`AGENTS_TRUSTED_SERVER_URLS`, and the built-in todo one) and, for
+any other server an owner adds, exactly the tools the owner lists as read-only on that server row -- a
+server an owner typed in can annotate anything it likes, so its word is not taken. Every tool call is checked
 again by agent-service against the row as it is saved *at that moment*, so flipping a server from WRITE to
 READ on the page while an agent is connected is obeyed from its next call. What ran and what was refused is in
 the agent's activity log on the same page.
