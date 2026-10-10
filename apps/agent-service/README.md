@@ -21,7 +21,7 @@ agent/     Agent  AgentMcpServer  Access  OthersAccess  AgentRepository  AgentSe
            NewAgent  UpdateAgent  NewMcpServer  UpdateMcpServer  AgentResponse  McpServerResponse  ServerUrls
            AuthHeaderCrypto  AuthHeaderMigration
 activity/  Activity  ActivityRepository  ActivityLog  ActivityResponse
-mcp/       AgentMcpServer (the /mcp endpoint and its handler)  McpTools  AgentTools  AccessDenied  ToolResult
+mcp/       AgentMcpServer (the /mcp endpoint and its handler)  McpTools  AgentTools  AccessDenied  ToolResult  ToolListCache
 token/     AgentTokens   (JwtVerifier, Revocations and Caller come from the shared apps/token module)
 stats/     StatsController  PublicStats
 support/   AgentExceptionAdvice
@@ -77,7 +77,14 @@ its two listing tools. Responses carry `trusted` per server so the page knows wh
 Two checks on purpose. `tools/list` is filtered by the access each row has, so a READ server's writing tools
 are not even described to the connecting agent. Each `tools/call` then re-reads the row: an owner who flips a
 server to READ, or removes it, while an agent is connected is obeyed from its next call, and an agent that
-calls a tool it was never offered is refused all the same. A refusal becomes an `isError` tool result the
+calls a tool it was never offered is refused all the same.
+
+What is checked against the row is the server's **raw listing**, which `ToolListCache` keeps for 15 seconds
+per URL and credential -- a SHA-256 of the forwarded token or stored header, never the credential itself --
+so `tools/list` does not connect to every server each time and `tools/call` does not list before it calls.
+The cache holds only what the server said its tools are; the URL policy runs before it is consulted and the
+permission check after, from the row as it is right now, so a cached listing can neither extend a permission
+nor skip the connect-time check. A tool the server adds or drops shows up within the 15 seconds. A refusal becomes an `isError` tool result the
 agent can read and a `tool_denied` line in the log.
 
 A result that is allowed is passed through **whole**: the content list -- text, images, audio, embedded
@@ -202,9 +209,10 @@ unreadable, so it belongs with the database.
   positive lookup for 30 seconds, so the two agree in practice; pinning the connection to the checked
   address needs a custom resolver on the client. The connecting token is forwarded only to servers
   explicitly marked for it.
-- **Every `tools/call` reconnects** to the one downstream server: initialize, list its tools (for the
-  read-only annotation), call, close. Three round trips per call. A short per-URL cache is the upgrade if
-  latency ever matters.
+- **Every `tools/call` still reconnects** to the one downstream server: initialize, call, close. The listing
+  it needs comes from the 15-second cache, so two round trips rather than three; keeping the connection open is
+  the upgrade if latency ever matters. The cache is one process-wide map, cleared outright past a thousand
+  entries rather than evicted by age.
 - **A per-agent revoke bites within ten seconds, not at once.** The other services poll the revocation feed
   rather than ask auth-service per request, so a revoked agent token keeps working for up to one poll window.
 - **One encryption key, no rotation.** The `v1:` prefix on each stored header is what a second key version
@@ -229,7 +237,9 @@ who may connect at all;
 including a server trusted when saved and refused at connect, a stored header reaching the server, and an
 image with structured content coming through unchanged; `AgentServiceTests` the ownership rules, the
 activity log, a private URL refused on add and on edit, and a header encrypted on disk, plain once loaded
-and migrated from a legacy row; `AuthHeaderCryptoTests` the round trip, the wrong key and a tampered row; `ServerUrlsTests` every refused address category,
+and migrated from a legacy row; `AuthHeaderCryptoTests` the round trip, the wrong key and a tampered row; `ToolListCacheTests` one listing
+per URL and credential within the TTL, a failure never cached, and a key that holds a hash rather than the
+token; `ServerUrlsTests` every refused address category,
 exact trust, and a name that moves to a private address between save and connect, all against a resolver
 table rather than DNS; `ApiContractTests` the 401, 404 and token shapes. The token check itself is tested
 once, in `apps/token`.
