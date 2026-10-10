@@ -1,12 +1,12 @@
 package com.demo.agentservice.mcp;
 
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.agent.dto.Access;
+import com.demo.agentservice.agent.entities.Access;
 import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.entities.AgentMcpServer;
 import com.demo.agentservice.agent.AgentService;
 import com.demo.agentservice.agent.dto.NewMcpServer;
-import com.demo.agentservice.agent.dto.OthersAccess;
+import com.demo.agentservice.agent.entities.OthersAccess;
 import com.demo.agentservice.agent.dto.UpdateAgent;
 import com.demo.agentservice.agent.dto.UpdateMcpServer;
 import com.demo.auth.client.Caller;

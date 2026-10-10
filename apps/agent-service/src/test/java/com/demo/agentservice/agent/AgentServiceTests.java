@@ -3,6 +3,8 @@ package com.demo.agentservice.agent;
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
 import com.demo.agentservice.agent.dto.*;
+import com.demo.agentservice.agent.entities.Access;
+import com.demo.agentservice.agent.entities.OthersAccess;
 import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.entities.AgentMcpServer;
 import com.demo.auth.client.Caller;
@@ -176,5 +178,32 @@ class AgentServiceTests {
         agents.addServer(user("5"), b.getId(), server("other", Access.WRITE), "");
         agents.addServer(user("5"), a.getId(), server("other", Access.WRITE), "");
         assertEquals(2, agents.get(user("5"), a.getId()).getServers().size(), "the same name on another agent is fine");
+    }
+
+    /** The caller's token is the owner's whole authority, so it never goes to a URL the owner typed in -- only to the deployment's own servers. */
+    @Test
+    void theCallersTokenIsForwardedOnlyToTheDeploymentsOwnServers() {
+        Agent a = agents.create(user("12"), new NewAgent("a", "", null));
+        Long todos = a.getServers().get(0).getId();
+
+        String why = assertThrows(ResponseStatusException.class, () -> agents.addServer(user("12"), a.getId(),
+                new NewMcpServer("mine", "http://mcp.example/mine", null, true, Access.READ), "")).getReason();
+        assertTrue(why.startsWith("the caller's token is only forwarded"), why);
+        AgentMcpServer mine = agents.addServer(user("12"), a.getId(), new NewMcpServer("mine", "http://mcp.example/mine", "Bearer own", false, Access.READ), "");
+        assertThrows(ResponseStatusException.class, () -> agents.updateServer(user("12"), a.getId(), mine.getId(),
+                new UpdateMcpServer(null, null, null, true, null), ""), "nor may the forward be switched on later");
+        // The other way round: the built-in server forwards, so it cannot be pointed at an untrusted URL with the forward still on.
+        assertThrows(ResponseStatusException.class, () -> agents.updateServer(user("12"), a.getId(), todos,
+                new UpdateMcpServer(null, "http://mcp.example/elsewhere", null, null, null), ""));
+        agents.updateServer(user("12"), a.getId(), todos, new UpdateMcpServer(null, "http://mcp.example/elsewhere", null, false, null), "");
+        assertFalse(agents.get(user("12"), a.getId()).getServers().get(0).isForwardCallerToken(), "both in one edit is fine");
+
+        // Column widths are refused here, not by the database.
+        assertThrows(ResponseStatusException.class, () -> agents.addServer(user("12"), a.getId(),
+                new NewMcpServer("long", "http://mcp.example/" + "x".repeat(250), null, false, Access.READ), ""));
+        assertThrows(ResponseStatusException.class, () -> agents.addServer(user("12"), a.getId(),
+                new NewMcpServer("hdr", "http://mcp.example/hdr", "Bearer " + "x".repeat(1400), false, Access.READ), ""));
+        assertThrows(ResponseStatusException.class, () -> agents.update(user("12"), a.getId(), new UpdateAgent(null, "x".repeat(8001), null), ""));
+        assertEquals(2, agents.get(user("12"), a.getId()).getServers().size(), "none of the refused rows stuck");
     }
 }

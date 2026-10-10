@@ -1,40 +1,32 @@
 package com.demo.authservice.user;
 
 import com.demo.authservice.support.AttemptWindow;
-import com.demo.authservice.support.TooManyAttemptsException;
+import com.demo.authservice.support.Passwords;
 import com.demo.authservice.token.Tokens;
 import com.demo.authservice.user.entities.AgentTokenVersion;
 import com.demo.authservice.user.entities.AgentTokenVersionRepository;
 import com.demo.authservice.user.entities.Role;
 import com.demo.authservice.user.entities.User;
 import com.demo.authservice.user.entities.UserRepository;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
-/** Users themselves: who exists, what their details are, and which user a caller's token names. */
+/**
+ * Users themselves: who exists, what their details are, and which user a caller's token names.
+ *
+ * <p>Every refusal is a {@link ResponseStatusException} with the status it means, so the web advice has nothing
+ * to translate and a controller can let it through untouched.
+ */
 @Service
 public class UserService {
-
-    /** Minimum we are willing to hash. Short passwords are the one input rule worth enforcing here. */
-    private static final int MIN_PASSWORD_LENGTH = 8;
-
-    /**
-     * BCrypt reads 72 bytes and silently ignores the rest, which would make any two passwords sharing a
-     * 72-byte prefix the same password. Reject the long ones instead of truncating them behind the user's back.
-     */
-    private static final int MAX_PASSWORD_BYTES = 72;
 
     /** The width Hibernate gives a String column. Checked here so Postgres does not answer with a misleading 400. */
     private static final int MAX_COLUMN_LENGTH = 255;
@@ -44,8 +36,6 @@ public class UserService {
     // fills the window and honest registrations wait it out with them. Per client needs the proxy to set the
     // header and this side to trust it.
     private final AttemptWindow registrations = new AttemptWindow(30, Duration.ofMinutes(15));
-
-    private final PasswordEncoder encoder = new BCryptPasswordEncoder();
 
     private final UserRepository users;
 
@@ -62,42 +52,45 @@ public class UserService {
     @Transactional
     public User register(String name, String email, String password) {
         if (registrations.exceeded("")) {
-            throw new TooManyAttemptsException("too many registrations right now, try again in "
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "too many registrations right now, try again in "
                     + registrations.window().toMinutes() + " minutes");
         }
         // Counted before the checks, so a rejected body costs an attempt the same as an accepted one.
         registrations.record("");
         String cleanName = cleanName(name);
         String cleanEmail = cleanEmail(email);
-        checkPassword(password);
+        String hash = Passwords.hash(password);
         // Racing registrations both get past this; the unique index on users.email is what actually decides.
         if (users.existsByEmail(cleanEmail)) {
-            throw new IllegalArgumentException("that email is already registered");
+            throw bad("that email is already registered");
         }
-        return users.save(new User(cleanName, cleanEmail, encoder.encode(password)));
+        return users.save(new User(cleanName, cleanEmail, hash));
     }
 
     /**
      * Changes the caller's own details. The current password is always required, even to change only the name,
      * so a borrowed tab cannot quietly take a user over. A blank newPassword leaves the password alone.
+     *
+     * <p>A new password also kills every token the user holds, including the one that asked: whoever changes a
+     * password is usually doing it because someone else may have the old one, and that someone's session must
+     * not outlive it. The controller hands the caller a fresh token in the same answer.
      */
     @Transactional
     public User update(Long userId, String name, String email, String currentPassword, String newPassword) {
-        User user = users.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("user not found"));
-        if (currentPassword == null || !encoder.matches(currentPassword, user.getPasswordHash())) {
-            throw new IllegalArgumentException("current password is wrong");
+        User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
+        if (!Passwords.matches(currentPassword, user.getPasswordHash())) {
+            throw bad("current password is wrong");
         }
         String cleanName = cleanName(name);
         String cleanEmail = cleanEmail(email);
         if (!cleanEmail.equals(user.getEmail()) && users.existsByEmail(cleanEmail)) {
-            throw new IllegalArgumentException("that email is already registered");
+            throw bad("that email is already registered");
         }
         user.setName(cleanName);
         user.setEmail(cleanEmail);
         if (newPassword != null && !newPassword.isBlank()) {
-            checkPassword(newPassword);
-            user.setPasswordHash(encoder.encode(newPassword));
+            user.setPasswordHash(Passwords.hash(newPassword));
+            user.setTokenVersion(user.getTokenVersion() + 1);
         }
         return users.save(user);
     }
@@ -116,12 +109,10 @@ public class UserService {
     @Transactional
     public User findOrCreateFromOAuth(String email, String name) {
         String cleanEmail = cleanEmail(email);
-        return users.findByEmail(cleanEmail).orElseGet(() -> {
-            // A hash of a value nobody holds, rather than a nullable column every password path would then
-            // have to test for. No password can match it, so the only way in stays the provider.
-            String unusable = encoder.encode(UUID.randomUUID().toString());
-            return users.save(new User(cleanName(nameOr(name, cleanEmail)), cleanEmail, unusable));
-        });
+        return users.findByEmail(cleanEmail).orElseGet(() ->
+                // A hash of a value nobody holds, rather than a nullable column every password path would then
+                // have to test for. No password can match it, so the only way in stays the provider.
+                users.save(new User(cleanName(nameOr(name, cleanEmail)), cleanEmail, Passwords.unusableHash())));
     }
 
     /**
@@ -156,7 +147,7 @@ public class UserService {
      */
     public String issueAgentToken(Long userId, Long agentId) {
         if (agentId == null) {
-            throw new IllegalArgumentException("agentId is required");
+            throw bad("agentId is required");
         }
         User user = users.findById(userId == null ? -1 : userId).filter(a -> !a.isSuspended())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "user not found"));
@@ -193,13 +184,12 @@ public class UserService {
     @Transactional
     public User changeRole(User admin, Long userId, Role role) {
         if (role == null) {
-            throw new IllegalArgumentException("a role is required");
+            throw bad("a role is required");
         }
         if (admin.getId().equals(userId) && role != Role.ADMIN) {
-            throw new IllegalArgumentException("an admin cannot take its own admin rights away");
+            throw bad("an admin cannot take its own admin rights away");
         }
-        User user = users.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("user not found"));
+        User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
         user.setRole(role);
         return users.save(user);
     }
@@ -211,10 +201,9 @@ public class UserService {
     @Transactional
     public User setSuspended(User admin, Long userId, boolean suspended) {
         if (admin.getId().equals(userId) && suspended) {
-            throw new IllegalArgumentException("an admin cannot suspend itself");
+            throw bad("an admin cannot suspend itself");
         }
-        User user = users.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("user not found"));
+        User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
         if (suspended && !user.isSuspended()) {
             user.setTokenVersion(user.getTokenVersion() + 1);
         }
@@ -225,8 +214,7 @@ public class UserService {
     /** Signs a user out everywhere: every token it holds stops working. It can log straight back in. */
     @Transactional
     public User revokeTokens(Long userId) {
-        User user = users.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("user not found"));
+        User user = users.findById(userId).orElseThrow(() -> bad("user not found"));
         user.setTokenVersion(user.getTokenVersion() + 1);
         return users.save(user);
     }
@@ -261,8 +249,7 @@ public class UserService {
             }
             return admin;
         }
-        checkPassword(password);
-        User admin = new User("Admin", cleanEmail, encoder.encode(password));
+        User admin = new User("Admin", cleanEmail, Passwords.hash(password));
         admin.setRole(Role.ADMIN);
         return users.save(admin);
     }
@@ -275,10 +262,10 @@ public class UserService {
     private static String cleanName(String name) {
         String clean = name == null ? "" : name.strip();
         if (clean.isEmpty()) {
-            throw new IllegalArgumentException("name is required");
+            throw bad("name is required");
         }
         if (clean.length() > MAX_COLUMN_LENGTH) {
-            throw new IllegalArgumentException("name must be at most " + MAX_COLUMN_LENGTH + " characters");
+            throw bad("name must be at most " + MAX_COLUMN_LENGTH + " characters");
         }
         return clean;
     }
@@ -286,17 +273,12 @@ public class UserService {
     private static String cleanEmail(String email) {
         String clean = email == null ? "" : email.strip().toLowerCase();
         if (clean.length() > MAX_COLUMN_LENGTH || !clean.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) {
-            throw new IllegalArgumentException("a valid email is required");
+            throw bad("a valid email is required");
         }
         return clean;
     }
 
-    private static void checkPassword(String password) {
-        if (password == null || password.length() < MIN_PASSWORD_LENGTH) {
-            throw new IllegalArgumentException("password must be at least " + MIN_PASSWORD_LENGTH + " characters");
-        }
-        if (password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) {
-            throw new IllegalArgumentException("password must be at most " + MAX_PASSWORD_BYTES + " bytes");
-        }
+    private static ResponseStatusException bad(String why) {
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, why);
     }
 }

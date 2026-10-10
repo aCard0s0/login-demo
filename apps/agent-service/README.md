@@ -17,17 +17,19 @@ the `agent` database.
 ## Packages
 
 ```
-agent/     Agent  AgentMcpServer  Access  OthersAccess  AgentRepository  AgentService  AgentController
-           NewAgent  UpdateAgent  NewMcpServer  UpdateMcpServer  AgentResponse  McpServerResponse  ServerUrls
-           AuthHeaderCrypto  AuthHeaderMigration
+agent/     AgentService  AgentController  ServerUrls  AuthHeaderCrypto  AuthHeaderMigration
+  entities/  Agent  AgentMcpServer  Access  OthersAccess  AgentRepository
+  dto/       NewAgent  UpdateAgent  NewMcpServer  UpdateMcpServer  AgentResponse  McpServerResponse
 activity/  Activity  ActivityRepository  ActivityLog  ActivityResponse
-mcp/       AgentMcpServer (the /mcp endpoint and its handler)  McpTools  AgentTools  AccessDenied  ToolResult  ToolListCache
+mcp/       AgentMcpEndpoint (the /mcp endpoint and its handler)  McpTools  AgentTools  AccessDenied  ToolResult  ToolListCache
 token/     AgentTokens   (JwtVerifier, Revocations and Caller come from the shared libs/auth-client module)
 stats/     StatsController  PublicStats
 support/   AgentExceptionAdvice
 ```
 
 `mcp` depends on `agent` and `activity`; `agent` depends on `activity` and `token`; nothing points back.
+Inside `agent`, `entities` holds what is stored (the two enums included, since the rows carry them) and `dto`
+what crosses the API; `dto` may import `entities`, never the other way round.
 `com.demo.auth.client` is the [`../../libs/auth-client`](../../libs/auth-client/README.md) module todo-service and wallet-service share.
 `AgentService` is the one place that decides whose agents a caller sees, and both the REST API and the tools
 one agent uses on another go through it.
@@ -47,7 +49,11 @@ page (`POST /api/agents/{id}/token/revoke`) kills every token made for that one 
 the agent's own version, the token's `agentVer` falls behind it, and every service refuses it within its
 ten-second poll of the revocation feed. The owner's login and their other agents are untouched. Whatever token the client connected with is what a
 server row marked *forward caller token* receives as its `Authorization` header -- which is how the built-in
-todo server knows whose todos to show, and why a READ agent cannot see anybody else's. Agents are not
+todo server knows whose todos to show, and why a READ agent cannot see anybody else's. That token is the
+owner's whole authority, so **it is forwarded only to the deployment's own servers** (`agents.trusted-server-urls`
+and the built-in todo one): marking any other row to forward is a 400 on save, and `McpTools` applies the
+same rule at the moment of use, so a URL dropped from the trusted list since cannot be sent it either. A
+server an owner typed in gets a stored `authHeader` of its own instead. Agents are not
 users; the `AGENT` role lives only on these tokens, and **every `/api` endpoint in every service answers it
 403**. Here, an agent token that could edit agents would widen its own access or mint itself fresh tokens,
 the very thing the agent tools refuse; at todo-service and wallet-service it would skip the READ/WRITE gate
@@ -151,7 +157,7 @@ the URL is `http://localhost:3000/mcp?agent=<id>`.
 claude mcp add --transport http todos "http://localhost:3000/mcp?agent=<id>" --header "Authorization: Bearer <token>"
 ```
 
-The handler (`AgentMcpServer.Handler`) is written out rather than built from the SDK's static tool list,
+The handler (`AgentMcpEndpoint.Handler`) is written out rather than built from the SDK's static tool list,
 because the tools differ per agent and per request. It answers `initialize` (the agent's instructions go in
 the result's `instructions`, so the connecting agent reads them first), `ping`, `tools/list` and
 `tools/call`; anything else is JSON-RPC *method not found*. A bad token, a missing `agent` parameter or an
@@ -169,7 +175,7 @@ one fixed endpoint.
 | GET | `/api/agents/{id}` | |
 | PATCH | `/api/agents/{id}` | `{name?, instructions?, othersAccess?}` -- only the fields sent change |
 | DELETE | `/api/agents/{id}` | and its activity |
-| POST | `/api/agents/{id}/servers` | `{name, url, access, forwardCallerToken?, authHeader?, readOnlyTools?}` |
+| POST | `/api/agents/{id}/servers` | `{name, url, access, forwardCallerToken?, authHeader?, readOnlyTools?}`; `forwardCallerToken` only on a trusted URL |
 | PATCH | `/api/agents/{id}/servers/{sid}` | `{name?, url?, access?, forwardCallerToken?, authHeader?, readOnlyTools?}`; an empty `authHeader` clears it, an empty `readOnlyTools` marks none |
 | DELETE | `/api/agents/{id}/servers/{sid}` | |
 | GET | `/api/agents/{id}/activity` | newest first, at most 100 |
@@ -208,7 +214,7 @@ unreadable, so it belongs with the database.
 - **The connect-time URL check resolves the name, then the HTTP client resolves it again.** The JVM caches a
   positive lookup for 30 seconds, so the two agree in practice; pinning the connection to the checked
   address needs a custom resolver on the client. The connecting token is forwarded only to servers
-  explicitly marked for it.
+  explicitly marked for it, and only when they are the deployment's own.
 - **Every `tools/call` still reconnects** to the one downstream server: initialize, call, close. The listing
   it needs comes from the 15-second cache, so two round trips rather than three; keeping the connection open is
   the upgrade if latency ever matters. The cache is one process-wide map, cleared outright past a thousand
@@ -229,14 +235,15 @@ docker compose up -d db
 ./mvnw -pl apps/agent-service test              # SQLite backed: needs nothing running
 ```
 
-Tests: `AgentMcpServerTests` runs the permission rules end to end -- the real MCP client connects to `/mcp`
+Tests: `AgentMcpEndpointTests` runs the permission rules end to end -- the real MCP client connects to `/mcp`
 as an external agent would, against a real MCP server mounted in the same context, reached once by a trusted
 URL and once by an untrusted one -- including a permission flipped between two calls, an agent trying to
 widen its own access, an untrusted server whose annotations are ignored in favour of the owner's list, and
 who may connect at all;
 including a server trusted when saved and refused at connect, a stored header reaching the server, and an
 image with structured content coming through unchanged; `AgentServiceTests` the ownership rules, the
-activity log, a private URL refused on add and on edit, and a header encrypted on disk, plain once loaded
+activity log, a private URL refused on add and on edit, the caller's token refused for an untrusted URL,
+column widths refused before the database sees them, and a header encrypted on disk, plain once loaded
 and migrated from a legacy row; `AuthHeaderCryptoTests` the round trip, the wrong key and a tampered row; `ToolListCacheTests` one listing
 per URL and credential within the TTL, a failure never cached, and a key that holds a hash rather than the
 token; `ServerUrlsTests` every refused address category,

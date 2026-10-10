@@ -56,7 +56,7 @@ import java.util.stream.Stream;
  * JSON-RPC errors, which is what the agent on the other end can show its user.
  */
 @Configuration
-public class AgentMcpServer {
+public class AgentMcpEndpoint {
 
     static final String AUTHORIZATION = "authorization";
     static final String AGENT = "agent";

@@ -1,5 +1,7 @@
 package com.demo.agentservice.token;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -19,6 +21,8 @@ import java.util.Map;
  */
 @Component
 public class AgentTokens {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentTokens.class);
 
     private final RestClient http;
 
@@ -47,7 +51,7 @@ public class AgentTokens {
             }
             return token;
         } catch (RuntimeException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "auth-service did not issue a token: " + e.getMessage());
+            throw failed("auth-service did not issue a token", e);
         }
     }
 
@@ -56,7 +60,13 @@ public class AgentTokens {
         try {
             http.post().uri(uri + "/" + agentId + "/revoke").header("X-Internal-Secret", secret).retrieve().toBodilessEntity();
         } catch (RuntimeException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "auth-service did not revoke the tokens: " + e.getMessage());
+            throw failed("auth-service did not revoke the tokens", e);
         }
+    }
+
+    /** The detail -- which names the internal URL and, on a 403, the secret being wrong -- goes to the log, not the page. */
+    private static ResponseStatusException failed(String what, RuntimeException e) {
+        log.warn("{}: {}", what, e.getMessage());
+        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, what);
     }
 }

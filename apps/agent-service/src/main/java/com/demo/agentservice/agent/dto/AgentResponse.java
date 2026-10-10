@@ -1,5 +1,8 @@
 package com.demo.agentservice.agent.dto;
 
+import com.demo.agentservice.agent.entities.Access;
+import com.demo.agentservice.agent.entities.OthersAccess;
+
 import com.demo.agentservice.agent.ServerUrls;
 import com.demo.agentservice.agent.entities.Agent;
 

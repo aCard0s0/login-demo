@@ -2,12 +2,12 @@ package com.demo.agentservice.mcp;
 
 import com.demo.agentservice.activity.Activity;
 import com.demo.agentservice.activity.ActivityLog;
-import com.demo.agentservice.agent.dto.Access;
+import com.demo.agentservice.agent.entities.Access;
 import com.demo.agentservice.agent.entities.Agent;
 import com.demo.agentservice.agent.AgentService;
 import com.demo.agentservice.agent.dto.NewAgent;
 import com.demo.agentservice.agent.dto.NewMcpServer;
-import com.demo.agentservice.agent.dto.OthersAccess;
+import com.demo.agentservice.agent.entities.OthersAccess;
 import com.demo.agentservice.agent.ServerUrls;
 import com.demo.agentservice.agent.dto.UpdateAgent;
 import com.demo.agentservice.agent.dto.UpdateMcpServer;
@@ -70,7 +70,7 @@ import static org.mockito.Mockito.when;
         // The port is only known once the server is up; ServerUrls reads this on every call, so the placeholder is fine.
         "agents.trusted-server-urls=http://127.0.0.1:${local.server.port}/fake-mcp",
 })
-class AgentMcpServerTests {
+class AgentMcpEndpointTests {
 
     /** Every tool call the fake server received, by tool name. */
     static final List<String> CALLS = new CopyOnWriteArrayList<>();
@@ -166,7 +166,7 @@ class AgentMcpServerTests {
         return agentWith(access, others, "/fake-mcp", null);
     }
 
-    /** The same server reached by a URL the deployment does not trust: an owner's own server, as far as the gateway knows. */
+    /** The same server reached by a URL the deployment does not trust: an owner's own server, as far as the gateway knows, so it is not sent the caller's token. */
     private Agent agentWithUntrusted(Access access, List<String> readOnlyTools) {
         return agentWith(access, OthersAccess.NONE, "/fake-mcp?untrusted", readOnlyTools);
     }
@@ -174,7 +174,8 @@ class AgentMcpServerTests {
     private Agent agentWith(Access access, OthersAccess others, String endpoint, List<String> readOnlyTools) {
         Agent agent = agents.create(OWNER, new NewAgent("gateway", "Be brief.", others));
         agents.removeServer(OWNER, agent.getId(), agent.getServers().get(0).getId(), "");
-        agents.addServer(OWNER, agent.getId(), new NewMcpServer("fake", "http://127.0.0.1:" + port + endpoint, null, true, access, readOnlyTools), "");
+        boolean trusted = endpoint.equals("/fake-mcp");
+        agents.addServer(OWNER, agent.getId(), new NewMcpServer("fake", "http://127.0.0.1:" + port + endpoint, null, trusted, access, readOnlyTools), "");
         return agents.get(OWNER, agent.getId());
     }
 
@@ -417,7 +418,8 @@ class AgentMcpServerTests {
     void initializeCarriesTheInstructionsAndADeadServerIsSkippedNotFatal() {
         Agent agent = agents.create(OWNER, new NewAgent("lonely", "Only ever list.", OthersAccess.NONE));
         agents.updateServer(OWNER, agent.getId(), agent.getServers().get(0).getId(),
-                new UpdateMcpServer(null, "http://127.0.0.1:1/nothing", null, null, null), "");
+                // Off the trusted list it may no longer forward the token, so that is switched off in the same edit.
+                new UpdateMcpServer(null, "http://127.0.0.1:1/nothing", null, false, null), "");
         try (McpSyncClient client = connect("tok-100", agent.getId())) {
             InitializeResult hello = client.getCurrentInitializationResult();
             assertEquals("Only ever list.", hello.instructions());

@@ -1,5 +1,6 @@
-package com.demo.authservice.user;
+package com.demo.authservice.internal;
 
+import com.demo.authservice.user.UserService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;

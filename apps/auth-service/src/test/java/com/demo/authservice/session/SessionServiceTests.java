@@ -1,8 +1,8 @@
 package com.demo.authservice.session;
 
 import com.demo.authservice.user.UserService;
-import com.demo.authservice.support.TooManyAttemptsException;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -53,7 +53,7 @@ class SessionServiceTests {
             assertTrue(sessions.login("katherine@example.com", "wrong").isEmpty());
         }
 
-        assertThrows(TooManyAttemptsException.class,
+        assertThrows(ResponseStatusException.class,
                 () -> sessions.login("katherine@example.com", "johnson-1918"),
                 "once locked out, even the correct password must not get through");
     }

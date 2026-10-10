@@ -37,7 +37,7 @@
   </main>
 
 <script type="module">
-import { $, api, requireLogin, renderNav, setSession, token } from '/app.js';
+import { $, api, requireLogin, renderNav, setSession } from '/app.js';
 
 if (requireLogin()) {
   const load = async () => {
@@ -60,8 +60,8 @@ if (requireLogin()) {
           newPassword: $('new-password').value,
         }),
       });
-      // The token still says the old name, so keep the header honest from the response instead.
-      setSession(token(), updated.name);
+      // The answer carries a fresh token: a new password killed the old one, and the name on it is now right.
+      setSession(updated.token, updated.name);
       renderNav();
       $('current-password').value = '';
       $('new-password').value = '';

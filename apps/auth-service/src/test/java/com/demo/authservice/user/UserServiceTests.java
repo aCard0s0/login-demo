@@ -6,6 +6,7 @@ import com.demo.authservice.user.entities.Role;
 import com.demo.authservice.user.entities.User;
 import com.demo.authservice.user.entities.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -52,15 +53,15 @@ class UserServiceTests {
         assertEquals(Role.MODERATOR, auth.changeRole(admin, user.getId(), Role.MODERATOR).getRole());
         assertEquals(Role.USER, auth.changeRole(admin, user.getId(), Role.USER).getRole(), "and back again");
 
-        assertThrows(IllegalArgumentException.class, () -> auth.changeRole(admin, user.getId(), null));
-        assertThrows(IllegalArgumentException.class, () -> auth.changeRole(admin, 999_999L, Role.MODERATOR));
+        assertThrows(ResponseStatusException.class, () -> auth.changeRole(admin, user.getId(), null));
+        assertThrows(ResponseStatusException.class, () -> auth.changeRole(admin, 999_999L, Role.MODERATOR));
     }
 
     @Test
     void anAdminCannotDemoteItself() {
         User admin = auth.ensureAdmin("last@example.com", "last-pass-01");
 
-        assertThrows(IllegalArgumentException.class, () -> auth.changeRole(admin, admin.getId(), Role.USER),
+        assertThrows(ResponseStatusException.class, () -> auth.changeRole(admin, admin.getId(), Role.USER),
                 "the last admin demoting itself would leave nobody able to promote anyone");
         assertEquals(Role.ADMIN, auth.changeRole(admin, admin.getId(), Role.ADMIN).getRole(),
                 "setting the role it already has is a no-op, not an error");
@@ -86,15 +87,15 @@ class UserServiceTests {
     void rejectsBadInputAndDuplicateEmail() {
         auth.register("Alan", "alan@example.com", "enigma-1936");
 
-        assertThrows(IllegalArgumentException.class, () -> auth.register("", "x@example.com", "long-enough"));
-        assertThrows(IllegalArgumentException.class, () -> auth.register("X", "not-an-email", "long-enough"));
-        assertThrows(IllegalArgumentException.class, () -> auth.register("X", "x@example.com", "short"));
-        assertThrows(IllegalArgumentException.class, () -> auth.register("X", "y@example.com", "x".repeat(73)),
+        assertThrows(ResponseStatusException.class, () -> auth.register("", "x@example.com", "long-enough"));
+        assertThrows(ResponseStatusException.class, () -> auth.register("X", "not-an-email", "long-enough"));
+        assertThrows(ResponseStatusException.class, () -> auth.register("X", "x@example.com", "short"));
+        assertThrows(ResponseStatusException.class, () -> auth.register("X", "y@example.com", "x".repeat(73)),
                 "BCrypt reads 72 bytes, so a longer password would be accepted truncated");
-        assertThrows(IllegalArgumentException.class, () -> auth.register("Alan again", "alan@example.com", "long-enough"));
-        assertThrows(IllegalArgumentException.class, () -> auth.register("N".repeat(256), "n@example.com", "long-enough"),
+        assertThrows(ResponseStatusException.class, () -> auth.register("Alan again", "alan@example.com", "long-enough"));
+        assertThrows(ResponseStatusException.class, () -> auth.register("N".repeat(256), "n@example.com", "long-enough"),
                 "the column is varchar(255), so a longer name must be refused here and not by the database");
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(ResponseStatusException.class,
                 () -> auth.register("Long", "l".repeat(250) + "@example.com", "long-enough"));
     }
 
@@ -103,10 +104,10 @@ class UserServiceTests {
         User taken = auth.register("Taken", "taken@example.com", "taken-pass-1");
         User edna = auth.register("Edna", "edna@example.com", "edna-pass-01");
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(ResponseStatusException.class,
                 () -> auth.update(edna.getId(), "Edna", "edna@example.com", "wrong", null),
                 "the current password must be checked even when only the name changes");
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(ResponseStatusException.class,
                 () -> auth.update(edna.getId(), "Edna", taken.getEmail(), "edna-pass-01", null),
                 "an update must not be able to steal another user's email");
 
@@ -160,7 +161,7 @@ class UserServiceTests {
         assertTrue(auth.byToken(before).isEmpty(), "reactivating must not bring an old token back");
         assertEquals(alan.getId(), auth.byToken(auth.issue(back)).orElseThrow().getId(), "a new token works");
 
-        assertThrows(IllegalArgumentException.class, () -> auth.setSuspended(admin, admin.getId(), true),
+        assertThrows(ResponseStatusException.class, () -> auth.setSuspended(admin, admin.getId(), true),
                 "an admin must not be able to lock itself out");
     }
 
