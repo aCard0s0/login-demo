@@ -33,7 +33,7 @@
     <properties>
         <java.version>26</java.version>
         <!-- Not managed by the Spring Boot BOM, unlike everything else here. -->
-        <sqlite-jdbc.version>3.47.1.0</sqlite-jdbc.version>
+        <sqlite-jdbc.version>3.53.4.0</sqlite-jdbc.version>
         <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>
         <!-- The 2.x line is the Jackson 3 one, matching Spring Boot 4; 0.x is Jackson 2. -->
         <mcp-bom.version>2.0.1</mcp-bom.version>
