@@ -35,7 +35,7 @@ EXPOSE 9084
 CMD ["java", "-jar", "app.jar"]
 
 # No dependencies to install: server.js is plain node with an empty package.json.
-FROM node:22-alpine AS web
+FROM node:25-alpine AS web
 WORKDIR /app
 COPY apps/web ./
 USER node
