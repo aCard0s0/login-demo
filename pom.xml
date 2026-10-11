@@ -36,7 +36,7 @@
         <sqlite-jdbc.version>3.47.1.0</sqlite-jdbc.version>
         <nimbus-jose-jwt.version>10.5</nimbus-jose-jwt.version>
         <!-- The 2.x line is the Jackson 3 one, matching Spring Boot 4; 0.x is Jackson 2. -->
-        <mcp-bom.version>2.0.0</mcp-bom.version>
+        <mcp-bom.version>2.0.1</mcp-bom.version>
         <archunit.version>1.5.1</archunit.version>
     </properties>
 
