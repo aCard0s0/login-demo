@@ -290,8 +290,8 @@ cmd_db_reset() {
   compose up -d --wait db
   say "database recreated empty — bring the services back with ./$PROG start"
 }
-cmd_db_reset_help() { say "  Drops the volume, so the init script runs again and every database and role"
-                      say "  is recreated. The services are left stopped; \`$PROG start\` brings them back."; }
+cmd_db_reset_help() { say "  Drops the volume. The services are left stopped; \`$PROG start\` brings them back,"
+                      say "  and db-init recreates every database and role on the way up."; }
 cmd_verify() {
   no_args "$@"
   have curl || die "curl is not on PATH — verify talks to the stack over real HTTP" 3

@@ -1,15 +1,13 @@
 -- One database and one role per service, so a service cannot reach another's tables even by accident.
 -- Development credentials: the db container publishes no port, so nothing outside the compose network
 -- can reach it. Change these before this goes anywhere real.
--- Runs once, when the volume is created: a service added later needs its lines run by hand or a `db reset`.
-CREATE USER auth WITH PASSWORD 'auth';
-CREATE DATABASE auth OWNER auth;
+-- The db-init service runs this on every `compose up`, before any service starts, so it only creates
+-- what is missing: a service added later is one more name in the list, on the volume you already have.
+-- Each role's password is its name. CREATE DATABASE cannot run inside a DO block, hence \gexec.
+\set services '{auth,todo,agent,wallet}'
 
-CREATE USER todo WITH PASSWORD 'todo';
-CREATE DATABASE todo OWNER todo;
+SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', s, s) FROM unnest(:'services'::text[]) s
+ WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = s)\gexec
 
-CREATE USER agent WITH PASSWORD 'agent';
-CREATE DATABASE agent OWNER agent;
-
-CREATE USER wallet WITH PASSWORD 'wallet';
-CREATE DATABASE wallet OWNER wallet;
+SELECT format('CREATE DATABASE %I OWNER %I', s, s) FROM unnest(:'services'::text[]) s
+ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = s)\gexec
