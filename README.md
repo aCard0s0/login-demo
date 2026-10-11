@@ -80,6 +80,7 @@ cp .env.example .env      # then change the admin password
 ```
 
 Open http://localhost:3000. Six containers: `db`, `auth-service`, `todo-service`, `agent-service`, `wallet-service`, `web`.
+A seventh, `db-init`, creates any missing database and role, then exits.
 
 `./login-demo` with no arguments prints every command it has; `./login-demo <command> --help` explains one.
 The ones worth knowing: `dev` runs the stack in the foreground, `status` and `logs` say what it is doing,
@@ -96,7 +97,7 @@ To run without Docker you still need the database, so start that one container a
 localhost -- which is what their `application.properties` already say:
 
 ```bash
-docker compose up -d db
+docker compose up -d db-init   # db, plus its databases and roles
 ./mvnw package
 java -jar apps/auth-service/target/auth-service-0.0.1-SNAPSHOT.jar &
 java -jar apps/todo-service/target/todo-service-0.0.1-SNAPSHOT.jar &
@@ -111,17 +112,9 @@ Postgres, with a database and a role per service (`auth`/`auth`, `todo`/`todo`, 
 `wallet`/`wallet`, created by `docker/initdb.sql`), so no service can read another's tables even by accident. The credentials are
 development values and the `db` container publishes no port; change them before this goes anywhere real.
 
-`docker/initdb.sql` runs only when the volume is created. A stack that predates agent-service or
-wallet-service lacks their databases, so either start over with `./login-demo db reset` or add them to the
-volume you have:
-
-```bash
-./login-demo exec db psql -U postgres -c "CREATE USER agent WITH PASSWORD 'agent';" -c "CREATE DATABASE agent OWNER agent;"
-```
-
-```bash
-./login-demo exec db psql -U postgres -c "CREATE USER wallet WITH PASSWORD 'wallet';" -c "CREATE DATABASE wallet OWNER wallet;"
-```
+`docker/initdb.sql` is run by `db-init`, a one-shot container every service waits on, on each `up` rather
+than only when the volume is created. It creates only what is missing, so a service added later gets its
+database on the volume you already have, with no `db reset`.
 
 Tests are the exception: they run against a throwaway SQLite file so `./mvnw test` needs nothing installed
 or running. That means the test suite does not exercise the same database the services actually use.
@@ -139,6 +132,7 @@ measured idle after `verify`:
 | agent-service | 320m | ~217 MiB (68%) | 1.0 |
 | wallet-service | 288m | not yet measured | 1.0 |
 | db | 192m | ~68 MiB (35%) | 0.5 |
+| db-init | 32m | one-shot `psql`, exits after a second | 0.5 |
 | web | 64m | ~18 MiB (27%) | 0.5 |
 
 The JVM services are the floor, not the ceiling: a JVM's resident size is mostly metaspace, code cache,

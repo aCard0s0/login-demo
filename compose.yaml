@@ -13,12 +13,26 @@ services:
       # Postgres 18+ puts the cluster in a major-version subdirectory, so the mount goes one
       # level up at /var/lib/postgresql. The pre-18 path (.../data) is refused outright.
       - db-data:/var/lib/postgresql
-      - ./docker/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
       timeout: 3s
       retries: 15
+
+  # Creates whatever role and database is missing, then exits. It runs on every `up`, not only when the
+  # volume is new, so a service added later gets its database on the volume that already exists.
+  db-init:
+    image: postgres:18-alpine
+    mem_limit: 32m
+    cpus: 0.5
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./docker/initdb.sql:/initdb.sql:ro
+    command: ["psql", "-h", "db", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-f", "/initdb.sql"]
+    depends_on:
+      db:
+        condition: service_healthy
 
   auth-service:
     build:
@@ -69,8 +83,8 @@ services:
       OAUTH_DISCORD_CLIENT_ID: ${OAUTH_DISCORD_CLIENT_ID:-}
       OAUTH_DISCORD_CLIENT_SECRET: ${OAUTH_DISCORD_CLIENT_SECRET:-}
     depends_on:
-      db:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:9081/api/public/stats || exit 1"]
       interval: 3s
@@ -95,8 +109,8 @@ services:
       AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
       AUTH_TOKEN_VERSIONS_URI: http://auth-service:9081/internal/token-versions
     depends_on:
-      db:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
       auth-service:
         condition: service_healthy
     healthcheck:
@@ -132,8 +146,8 @@ services:
       # address, or agent-service would POST into this network -- db, /internal -- on an owner's say-so.
       AGENTS_TRUSTED_SERVER_URLS: http://wallet-service:9084/mcp
     depends_on:
-      db:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
       auth-service:
         condition: service_healthy
       todo-service:
@@ -159,8 +173,8 @@ services:
       AUTH_JWKS_URI: http://auth-service:9081/api/jwks.json
       AUTH_TOKEN_VERSIONS_URI: http://auth-service:9081/internal/token-versions
     depends_on:
-      db:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
       auth-service:
         condition: service_healthy
     healthcheck:
