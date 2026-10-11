@@ -1,5 +1,5 @@
 # One build for the whole reactor. Both service stages copy out of this one, so it runs once.
-FROM eclipse-temurin:26-jdk-alpine AS build
+FROM eclipse-temurin:27-jdk-alpine AS build
 WORKDIR /src
 COPY .mvn .mvn
 COPY mvnw pom.xml ./
@@ -9,7 +9,7 @@ COPY libs libs
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -DskipTests package
 
 # Shared runtime: a JRE and an unprivileged user, so no service runs as root.
-FROM eclipse-temurin:26-jre-alpine AS runtime
+FROM eclipse-temurin:27-jre-alpine AS runtime
 RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
 USER app
